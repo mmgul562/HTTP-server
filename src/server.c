@@ -5,6 +5,14 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include <signal.h>
+
+
+volatile sig_atomic_t keep_running = 1;
+
+void signal_handler(int signum) {
+    keep_running = 0;
+}
 
 
 int server_init(Server *server, int port) {
@@ -36,11 +44,41 @@ int server_init(Server *server, int port) {
 void server_run(Server *server) {
     printf("Server listening on port %d\n", server->port);
 
-    while (1) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = signal_handler;
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
+
+    while (keep_running) {
         struct sockaddr_in client_addr;
         socklen_t client_len = sizeof(client_addr);
-        int client_socket = accept(server->server_socket, (struct sockaddr *) &client_addr, &client_len);
+
+        fd_set read_fds;
+        FD_ZERO(&read_fds);
+        FD_SET(server->server_socket, &read_fds);
+
+        struct timeval timeout;
+        timeout.tv_sec = 1;
+        timeout.tv_usec = 0;
+
+        int ready = select(server->server_socket + 1, &read_fds, NULL, NULL, &timeout);
+
+        if (ready < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            perror("Select failed");
+            break;
+        } else if (ready == 0) {
+            continue;
+        }
+
+        int client_socket = accept(server->server_socket, (struct sockaddr *)&client_addr, &client_len);
         if (client_socket < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
             perror("Accept failed");
             continue;
         }
@@ -48,6 +86,8 @@ void server_run(Server *server) {
         printf("New connection accepted\n");
         handle_client(client_socket);
     }
+
+    printf("Server shutting down...\n");
 }
 
 
@@ -110,7 +150,7 @@ void handle_client(int client_socket) {
 
             send_http_response(&request, client_socket);
             free_http_request(&request);
-        };
+        }
     }
 
     free(buffer);
