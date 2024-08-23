@@ -15,8 +15,9 @@ void signal_handler(int signum) {
 }
 
 
-int server_init(Server *server, int port) {
+int server_init(Server *server, int port, int thread_pool_size) {
     server->port = port;
+    server->thread_pool_size = thread_pool_size;
     server->server_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (server->server_socket == -1) {
         perror("Socket creation failed");
@@ -43,6 +44,9 @@ int server_init(Server *server, int port) {
 
 void server_run(Server *server) {
     printf("Server listening on port %d\n", server->port);
+
+    pthread_t threads[server->thread_pool_size];
+    int thread_idx = 0;
 
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
@@ -74,24 +78,42 @@ void server_run(Server *server) {
             continue;
         }
 
-        int client_socket = accept(server->server_socket, (struct sockaddr *)&client_addr, &client_len);
-        if (client_socket < 0) {
+        int *client_socket = malloc(sizeof(int));
+        if (client_socket == NULL) {
+            perror("Failed to allocate memory for client socket");
+            continue;
+        }
+        *client_socket = accept(server->server_socket, (struct sockaddr *) &client_addr, &client_len);
+        if (*client_socket < 0) {
             if (errno == EINTR) {
+                free(client_socket);
                 continue;
             }
             perror("Accept failed");
+            free(client_socket);
             continue;
         }
 
         printf("New connection accepted\n");
-        handle_client(client_socket);
+
+        if (pthread_create(&threads[thread_idx], NULL, handle_client, (void *) client_socket) != 0) {
+            perror("Failed to create client thread");
+            close(*client_socket);
+            free(client_socket);
+        } else {
+            pthread_detach(threads[thread_idx]);
+            thread_idx = (thread_idx + 1) % server->thread_pool_size;
+        }
     }
 
     printf("Server shutting down...\n");
 }
 
 
-void handle_client(int client_socket) {
+void *handle_client(void *client_socket_ptr) {
+    int client_socket = *(int *) client_socket_ptr;
+    free(client_socket_ptr);
+
     char *buffer = NULL;
     size_t buffer_size = 0;
     size_t total_bytes = 0;
@@ -104,7 +126,7 @@ void handle_client(int client_socket) {
             perror("Failed to allocate memory");
             free(buffer);
             close(client_socket);
-            return;
+            return NULL;
         }
         buffer = new_buffer;
 
@@ -117,7 +139,7 @@ void handle_client(int client_socket) {
                 perror("recv failed");
                 free(buffer);
                 close(client_socket);
-                return;
+                return NULL;
             }
         } else if (bytes_received == 0) {
             break;
@@ -137,10 +159,8 @@ void handle_client(int client_socket) {
         HttpRequest request;
         memset(&request, 0, sizeof(HttpRequest));
 
-        if (parse_http_request(buffer, &request) != 0) {
-            char error_msg[] = "No HTTP request";
-            send(client_socket, error_msg, sizeof(error_msg) - 1, 0);
-        } else {
+        RequestParsingStatus status = parse_http_request(buffer, &request);
+        if (status == REQ_PARSE_SUCCESS) {
             printf("Received request:\n");
             printf("Method: %s\n", request.method);
             printf("Path: %s\n", request.path);
@@ -150,9 +170,12 @@ void handle_client(int client_socket) {
 
             send_http_response(&request, client_socket);
             free_http_request(&request);
+        } else {
+            send_failure_response(status, client_socket);
         }
-    }
 
-    free(buffer);
-    close(client_socket);
+        free(buffer);
+        close(client_socket);
+        return NULL;
+    }
 }

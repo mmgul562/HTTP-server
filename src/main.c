@@ -3,11 +3,12 @@
 #include <unistd.h>
 
 #define PORT 8080
+#define THREAD_POOL_SIZE 10
 
 
 int main() {
     Server server;
-    if (server_init(&server, PORT) != 0) {
+    if (server_init(&server, PORT, THREAD_POOL_SIZE) != 0) {
         exit(EXIT_FAILURE);
     }
 
