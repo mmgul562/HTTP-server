@@ -2,7 +2,6 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <arpa/inet.h>
 
 
 RequestParsingStatus parse_http_request(char *buffer, HttpRequest *request) {
@@ -21,6 +20,7 @@ RequestParsingStatus parse_http_request(char *buffer, HttpRequest *request) {
 
     if (strlen(method) >= sizeof(request->method) ||
         strlen(path) >= sizeof(request->path) ||
+        path[0] != '/' ||
         strlen(protocol) >= sizeof(request->protocol) ||
         strncmp(protocol, "HTTP/", 5) != 0) {
         return REQ_PARSE_INVALID_FORMAT;
@@ -62,38 +62,6 @@ RequestParsingStatus parse_http_request(char *buffer, HttpRequest *request) {
         request->headers = NULL;
     }
     return REQ_PARSE_SUCCESS;
-}
-
-// will add a proper router later
-void send_http_response(HttpRequest *request, int client_socket) {
-    char response[1024];
-    if (strcmp(request->method, "GET") == 0) {
-        if (strcmp(request->path, "/") == 0) {
-            sprintf(response, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<h1>Hello, World!</h1>\n");
-        } else {
-            sprintf(response, "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\n\r\n<h1>Page not found!</h1>\n");
-        }
-    } else {
-        sprintf(response, "HTTP/1.1 405 Method Not Allowed\r\nContent-Type: text/plain\r\n\r\nMethod %s not allowed\n",
-                request->method);
-    }
-    send(client_socket, response, strlen(response), 0);
-}
-
-
-void send_failure_response(RequestParsingStatus status, int client_socket) {
-    const char *error_msg;
-    switch (status) {
-        case REQ_PARSE_INVALID_FORMAT:
-            error_msg = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n\r\nInvalid request format\n";
-            break;
-        case REQ_PARSE_MEMORY_FAILURE:
-            error_msg = "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\n\r\nServer encountered an error\n";
-            break;
-        default:
-            error_msg = "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\n\r\nUnknown error occurred\n";
-    }
-    send(client_socket, error_msg, strlen(error_msg), 0);
 }
 
 

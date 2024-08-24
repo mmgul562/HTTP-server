@@ -1,5 +1,6 @@
 #include "server.h"
 #include "request.h"
+#include "response.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -171,6 +172,7 @@ void *handle_client(void *client_socket_ptr) {
             send_http_response(&request, client_socket);
             free_http_request(&request);
         } else {
+            printf("Rejected request\n");
             send_failure_response(status, client_socket);
         }
 
