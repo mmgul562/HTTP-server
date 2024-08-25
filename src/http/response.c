@@ -1,4 +1,5 @@
 #include "response.h"
+#include "router.h"
 #include <arpa/inet.h>
 #include <string.h>
 #include <stdio.h>
@@ -10,6 +11,16 @@
 
 #define MAX_PATH_LENGTH 304
 #define DOCUMENT_ROOT "../src/http/www"
+
+
+const char *get_route_file(const char *url) {
+    for (int i = 0; i < ROUTES_COUNT; ++i) {
+        if (strcmp(url, ROUTES[i].url) == 0) {
+            return ROUTES[i].file;
+        }
+    }
+    return NULL;
+}
 
 
 const char *get_content_type(const char *path) {
@@ -60,6 +71,13 @@ void send_html(int client_socket, const char *file_path) {
     int fd = open(file_path, O_RDONLY);
     if (fd == -1) {
         perror("Error opening file");
+        // at this point the file's existence was checked, so if opening it fails, there's something wrong on our side
+        // it'll be better to send normal message instead of html error file
+        char error[] = "HTTP/1.1 500 Internal Server Error\r\n"
+                       "Content-Type: text/html\r\n\r\n"
+                       "<h1>500 Internal Server Error</h1>"
+                       "<p>There was an unexpected error on our side. Please try again later.</p>\r\n";
+        send(client_socket, error, sizeof(error), 0);
         return;
     }
     char buffer[4096];
@@ -73,9 +91,11 @@ void send_html(int client_socket, const char *file_path) {
 
 void send_http_response(HttpRequest *request, int client_socket) {
     char file_path[MAX_PATH_LENGTH];
-    snprintf(file_path, sizeof(file_path), "%s%s", DOCUMENT_ROOT, request->path);
-    if (strcmp(request->path, "/") == 0) {
-        strcat(file_path, "index.html");
+    const char *route_file = get_route_file(request->path);
+    if (route_file) {
+        snprintf(file_path, sizeof(file_path), "%s/%s", DOCUMENT_ROOT, route_file);
+    } else {
+        snprintf(file_path, sizeof(file_path), "%s%s", DOCUMENT_ROOT, request->path);
     }
 
     if (!is_path_safe(file_path)) {

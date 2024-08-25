@@ -12,4 +12,5 @@ void send_headers(int client_socket, int status_code, const char *status_text, c
 
 void send_failure_response(RequestParsingStatus status, int client_socket);
 
+
 #endif
