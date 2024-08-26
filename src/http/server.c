@@ -6,13 +6,86 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include <pthread.h>
 #include <signal.h>
 
 
 volatile sig_atomic_t keep_running = 1;
 
-void signal_handler(int signum) {
+static void signal_handler(int signum) {
     keep_running = 0;
+}
+
+
+static void *handle_client(void *client_socket_ptr) {
+    int client_socket = *(int *) client_socket_ptr;
+    free(client_socket_ptr);
+
+    char *buffer = NULL;
+    size_t buffer_size = 0;
+    size_t total_bytes = 0;
+    ssize_t bytes_received;
+
+    while (1) {
+        buffer_size += 1024;
+        char *new_buffer = realloc(buffer, buffer_size);
+        if (!new_buffer) {
+            perror("Failed to allocate memory");
+            free(buffer);
+            close(client_socket);
+            return NULL;
+        }
+        buffer = new_buffer;
+
+        bytes_received = recv(client_socket, buffer + total_bytes, buffer_size - total_bytes - 1, 0);
+
+        if (bytes_received < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                continue;
+            } else {
+                perror("recv failed");
+                free(buffer);
+                close(client_socket);
+                return NULL;
+            }
+        } else if (bytes_received == 0) {
+            break;
+        }
+        total_bytes += bytes_received;
+
+        if (strstr(buffer, "\r\n\r\n")) {
+            break;
+        }
+        if (total_bytes >= buffer_size - 1) {
+            continue;
+        }
+    }
+
+    if (total_bytes > 0) {
+        buffer[total_bytes] = '\0';
+        HttpRequest request;
+        memset(&request, 0, sizeof(HttpRequest));
+
+        RequestParsingStatus status = parse_http_request(buffer, &request);
+        if (status == REQ_PARSE_SUCCESS) {
+            printf("Received request:\n");
+            printf("Method: %s\n", request.method);
+            printf("Path: %s\n", request.path);
+            printf("Protocol: %s\n", request.protocol);
+            printf("Headers:\n%s\n", request.headers ? request.headers : "");
+            printf("Body: %s\n\n", request.body ? request.body : "");
+
+            send_http_response(&request, client_socket);
+            free_http_request(&request);
+        } else {
+            printf("Rejected request\n");
+            send_failure_response(status, client_socket);
+        }
+
+        free(buffer);
+        close(client_socket);
+    }
+    return NULL;
 }
 
 
@@ -108,76 +181,4 @@ void server_run(Server *server) {
     }
 
     printf("Server shutting down...\n");
-}
-
-
-void *handle_client(void *client_socket_ptr) {
-    int client_socket = *(int *) client_socket_ptr;
-    free(client_socket_ptr);
-
-    char *buffer = NULL;
-    size_t buffer_size = 0;
-    size_t total_bytes = 0;
-    ssize_t bytes_received;
-
-    while (1) {
-        buffer_size += 1024;
-        char *new_buffer = realloc(buffer, buffer_size);
-        if (!new_buffer) {
-            perror("Failed to allocate memory");
-            free(buffer);
-            close(client_socket);
-            return NULL;
-        }
-        buffer = new_buffer;
-
-        bytes_received = recv(client_socket, buffer + total_bytes, buffer_size - total_bytes - 1, 0);
-
-        if (bytes_received < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                continue;
-            } else {
-                perror("recv failed");
-                free(buffer);
-                close(client_socket);
-                return NULL;
-            }
-        } else if (bytes_received == 0) {
-            break;
-        }
-        total_bytes += bytes_received;
-
-        if (strstr(buffer, "\r\n\r\n")) {
-            break;
-        }
-        if (total_bytes >= buffer_size - 1) {
-            continue;
-        }
-    }
-
-    if (total_bytes > 0) {
-        buffer[total_bytes] = '\0';
-        HttpRequest request;
-        memset(&request, 0, sizeof(HttpRequest));
-
-        RequestParsingStatus status = parse_http_request(buffer, &request);
-        if (status == REQ_PARSE_SUCCESS) {
-            printf("Received request:\n");
-            printf("Method: %s\n", request.method);
-            printf("Path: %s\n", request.path);
-            printf("Protocol: %s\n", request.protocol);
-            printf("Headers:\n%s\n", request.headers ? request.headers : "");
-            printf("Body: %s\n\n", request.body ? request.body : "");
-
-            send_http_response(&request, client_socket);
-            free_http_request(&request);
-        } else {
-            printf("Rejected request\n");
-            send_failure_response(status, client_socket);
-        }
-
-        free(buffer);
-        close(client_socket);
-        return NULL;
-    }
 }

@@ -7,13 +7,12 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
-#include <errno.h>
 
 #define MAX_PATH_LENGTH 304
 #define DOCUMENT_ROOT "../src/http/www"
 
 
-const char *get_route_file(const char *url) {
+static const char *get_route_file(const char *url) {
     for (int i = 0; i < ROUTES_COUNT; ++i) {
         if (strcmp(url, ROUTES[i].url) == 0) {
             return ROUTES[i].file;
@@ -23,7 +22,7 @@ const char *get_route_file(const char *url) {
 }
 
 
-const char *get_content_type(const char *path) {
+static const char *get_content_type(const char *path) {
     const char *extension = strrchr(path, '.');
     if (extension == NULL) return "application/octet-stream";
     if (strcmp(extension, ".html") == 0 || strcmp(extension, ".htm") == 0) return "text/html";
@@ -36,17 +35,15 @@ const char *get_content_type(const char *path) {
 }
 
 
-int is_path_safe(const char *path) {
+static int is_path_safe(const char *path) {
     char resolved_path[MAX_PATH_LENGTH];
     char resolved_root[MAX_PATH_LENGTH];
 
     if (realpath(path, resolved_path) == NULL) {
-        if (errno == ENOENT) {
-            return 1;   // 404 will be sent shortly after
-        }
         return 0;
     }
     if (realpath(DOCUMENT_ROOT, resolved_root) == NULL) {
+        perror("Invalid DOCUMENT_ROOT");
         return 0;
     }
 
@@ -54,9 +51,28 @@ int is_path_safe(const char *path) {
 }
 
 
-void send_headers(int client_socket, int status_code, const char *status_text, const char *content_type, const char *other) {
+static void send_headers(int client_socket, int status_code, const char *content_type, const char *other) {
     char response_header[1024];
     if (!other) other = "";
+
+    const char *status_text;
+    switch (status_code) {
+        case 400:
+            status_text = "Bad Request";
+            break;
+        case 403:
+            status_text = "Forbidden";
+            break;
+        case 404:
+            status_text = "Not Found";
+            break;
+        case 500:
+            status_text = "Internal Server Error";
+            break;
+        default:
+            status_text = "Internal Server Error";
+    }
+
     sprintf(response_header, "HTTP/1.1 %d %s\r\n"
                              "Content-Type: %s\r\n"
                              "%s"
@@ -67,24 +83,58 @@ void send_headers(int client_socket, int status_code, const char *status_text, c
 }
 
 
-void send_html(int client_socket, const char *file_path) {
-    int fd = open(file_path, O_RDONLY);
-    if (fd == -1) {
-        perror("Error opening file");
-        // at this point the file's existence was checked, so if opening it fails, there's something wrong on our side
-        // it'll be better to send normal message instead of html error file
-        char error[] = "HTTP/1.1 500 Internal Server Error\r\n"
-                       "Content-Type: text/html\r\n\r\n"
-                       "<h1>500 Internal Server Error</h1>"
-                       "<p>There was an unexpected error on our side. Please try again later.</p>\r\n";
-        send(client_socket, error, sizeof(error), 0);
-        return;
-    }
+static void send_file(int client_socket, int fd) {
     char buffer[4096];
     ssize_t bytes_read;
     while ((bytes_read = read(fd, buffer, sizeof(buffer))) > 0) {
         send(client_socket, buffer, bytes_read, 0);
     }
+}
+
+
+static void try_sending_error(int client_socket, int status_code) {
+    char err_path[MAX_PATH_LENGTH];
+    snprintf(err_path, sizeof(err_path), DOCUMENT_ROOT"/errors/%d.html", status_code);
+    int fd = open(err_path, O_RDONLY);
+    if (fd == -1) {
+        perror("Error opening error file");
+        if (status_code == 500) {
+            send_headers(client_socket, 500, "text/html", NULL);
+            send(client_socket, "<h1>Internal Server Error</h1>\r\n"
+                                "\t<p>Sorry, something went wrong on our side. Please try again later.</p>\r\n",
+                 30, 0);
+        } else {
+            try_sending_error(client_socket, 500);
+        }
+        return;
+    }
+    send_headers(client_socket, status_code, "text/html", NULL);
+    send_file(client_socket, fd);
+    close(fd);
+}
+
+
+static void try_sending_file(int client_socket, const char *file_path) {
+    int fd = open(file_path, O_RDONLY);
+    if (fd == -1) {
+        perror("Error opening file");
+        try_sending_error(client_socket, 500);
+        return;
+    }
+    struct stat file_stat;
+    if (stat(file_path, &file_stat) != 0) {
+        perror("Error getting file stats");
+        try_sending_error(client_socket, 500);
+        return;
+    }
+
+    off_t file_size = file_stat.st_size;
+    const char *content_type = get_content_type(file_path);
+    char content_length[64];
+    snprintf(content_length, sizeof(content_length), "Content-Length: %ld\r\n", file_size);
+
+    send_headers(client_socket, 200, content_type, content_length);
+    send_file(client_socket, fd);
     close(fd);
 }
 
@@ -95,50 +145,21 @@ void send_http_response(HttpRequest *request, int client_socket) {
     if (route_file) {
         snprintf(file_path, sizeof(file_path), "%s/%s", DOCUMENT_ROOT, route_file);
     } else {
-        snprintf(file_path, sizeof(file_path), "%s%s", DOCUMENT_ROOT, request->path);
+        snprintf(file_path, sizeof(file_path), "%s/static%s", DOCUMENT_ROOT, request->path);
+        if (!is_path_safe(file_path)) {
+            try_sending_error(client_socket, 404);
+            return;
+        }
     }
 
-    if (!is_path_safe(file_path)) {
-        send_headers(client_socket, 403, "Forbidden", "text/html", NULL);
-        snprintf(file_path, sizeof(file_path), "%s/errors/403.html", DOCUMENT_ROOT);
-        send_html(client_socket, file_path);
-        return;
-    }
-
-    if (access(file_path, F_OK) != 0) {
-        send_headers(client_socket, 404, "Not Found", "text/html", NULL);
-        snprintf(file_path, sizeof(file_path), "%s/errors/404.html", DOCUMENT_ROOT);
-        send_html(client_socket, file_path);
-        return;
-    }
-
-    struct stat file_stat;
-    if (stat(file_path, &file_stat) != 0) {
-        perror("Error getting file stats");
-        send_headers(client_socket, 500, "Internal Server Error", "text/html", NULL);
-        snprintf(file_path, sizeof(file_path), "%s/errors/500.html", DOCUMENT_ROOT);
-        send_html(client_socket, file_path);
-        return;
-    }
-
-    off_t file_size = file_stat.st_size;
-    const char *content_type = get_content_type(file_path);
-    char content_length[64];
-    snprintf(content_length, sizeof(content_length), "Content-Length: %ld\r\n", file_size);
-
-    send_headers(client_socket, 200, "OK", content_type, content_length);
-    send_html(client_socket, file_path);
+    try_sending_file(client_socket, file_path);
 }
 
 
 void send_failure_response(RequestParsingStatus status, int client_socket) {
-    char path[MAX_PATH_LENGTH];
     if (status == REQ_PARSE_INVALID_FORMAT) {
-        snprintf(path, sizeof(path), "%s/errors/400.html", DOCUMENT_ROOT);
-        send_headers(client_socket, 400, "Bad Request", "text/html", NULL);
+        try_sending_error(client_socket, 400);
     } else {
-        snprintf(path, sizeof(path), "%s/errors/500.html", DOCUMENT_ROOT);
-        send_headers(client_socket, 500, "Internal Server Error", "text/html", NULL);
+        try_sending_error(client_socket, 500);
     }
-    send_html(client_socket, path);
 }
