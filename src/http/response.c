@@ -1,5 +1,4 @@
 #include "response.h"
-#include "router.h"
 #include <arpa/inet.h>
 #include <string.h>
 #include <stdio.h>
@@ -11,15 +10,15 @@
 #define MAX_PATH_LENGTH 304
 #define DOCUMENT_ROOT "../src/http/www"
 
+static void get_home(int client_socket);
+static void get_about(int client_socket);
 
-static const char *get_route_file(const char *url) {
-    for (int i = 0; i < ROUTES_COUNT; ++i) {
-        if (strcmp(url, ROUTES[i].url) == 0) {
-            return ROUTES[i].file;
-        }
-    }
-    return NULL;
-}
+
+const Route ROUTES[] = { {"/", GET, get_home},
+                         {"/about", GET, get_about}
+};
+
+const int ROUTES_COUNT = sizeof(ROUTES) / sizeof(Route);
 
 
 static const char *get_content_type(const char *path) {
@@ -66,6 +65,9 @@ static void send_headers(int client_socket, int status_code, const char *content
         case 404:
             status_text = "Not Found";
             break;
+        case 405:
+            status_text = "Method Not Allowed";
+            break;
         case 500:
             status_text = "Internal Server Error";
             break;
@@ -95,14 +97,15 @@ static void send_file(int client_socket, int fd) {
 static void try_sending_error(int client_socket, int status_code) {
     char err_path[MAX_PATH_LENGTH];
     snprintf(err_path, sizeof(err_path), DOCUMENT_ROOT"/errors/%d.html", status_code);
+
     int fd = open(err_path, O_RDONLY);
     if (fd == -1) {
         perror("Error opening error file");
         if (status_code == 500) {
             send_headers(client_socket, 500, "text/html", NULL);
-            send(client_socket, "<h1>Internal Server Error</h1>\r\n"
-                                "\t<p>Sorry, something went wrong on our side. Please try again later.</p>\r\n",
-                 30, 0);
+            const char err_msg[] = "<h1>Internal Server Error</h1>\r\n"
+                                "\t<p>Sorry, something went wrong on our side. Please try again later.</p>\r\n";
+            send(client_socket, err_msg,sizeof(err_msg), 0);
         } else {
             try_sending_error(client_socket, 500);
         }
@@ -139,20 +142,66 @@ static void try_sending_file(int client_socket, const char *file_path) {
 }
 
 
+static void get_home(int client_socket) {
+    const char *home_path = DOCUMENT_ROOT"/index.html";
+    try_sending_file(client_socket, home_path);
+}
+
+
+static void get_about(int client_socket) {
+    const char *about_path = DOCUMENT_ROOT"/about.html";
+    try_sending_file(client_socket, about_path);
+}
+
+
+static const Route* check_route(const char *url) {
+    for (int i = 0; i < ROUTES_COUNT; ++i) {
+        if (strcmp(url, ROUTES[i].url) == 0) {
+            return &ROUTES[i];
+        }
+    }
+    return NULL;
+}
+
+
+static int parse_request_method(const char *method) {
+    if (strcmp(method, "GET") == 0) {
+        return GET;
+    } else if (strcmp(method, "POST") == 0) {
+        return POST;
+    }
+    return -1;
+}
+
+
 void send_http_response(HttpRequest *request, int client_socket) {
-    char file_path[MAX_PATH_LENGTH];
-    const char *route_file = get_route_file(request->path);
-    if (route_file) {
-        snprintf(file_path, sizeof(file_path), "%s/%s", DOCUMENT_ROOT, route_file);
-    } else {
+    int req_method = parse_request_method(request->method);
+    if (req_method == -1) {
+        try_sending_error(client_socket, 400);
+        return;
+    }
+
+    const Route *route = check_route(request->path);
+    if (route) {                                                        // routed files
+        if (req_method != route->method) {
+            try_sending_error(client_socket, 405);
+            return;
+        }
+        route->handler(client_socket);
+        return;
+    } else {                                                            // static files
+        if (req_method != GET) {
+            try_sending_error(client_socket, 405);
+            return;
+        }
+        char file_path[MAX_PATH_LENGTH];
         snprintf(file_path, sizeof(file_path), "%s/static%s", DOCUMENT_ROOT, request->path);
         if (!is_path_safe(file_path)) {
             try_sending_error(client_socket, 404);
             return;
         }
+        try_sending_file(client_socket, file_path);
     }
-
-    try_sending_file(client_socket, file_path);
 }
 
 

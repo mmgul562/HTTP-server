@@ -10,5 +10,4 @@ add_executable(HTTP_server src/main.c
         src/http/server.h
         src/http/response.c
         src/http/response.h
-        src/http/router.h
 )
