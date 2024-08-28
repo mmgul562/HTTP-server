@@ -17,9 +17,38 @@ static void signal_handler(int signum) {
 }
 
 
-static void *handle_client(void *client_socket_ptr) {
-    int client_socket = *(int *) client_socket_ptr;
-    free(client_socket_ptr);
+static PGconn *connect_to_db() {
+    char *db_name = getenv("DB_NAME");
+    char *db_user = getenv("DB_USER");
+    char *db_password = getenv("DB_PASSWD");
+    char *db_host = getenv("DB_HOST");
+    char *db_port = getenv("DB_PORT");
+
+    if (!db_name || !db_user || !db_password || !db_host || !db_port) {
+        fprintf(stderr, "Missing environment variables for database connection\n");
+        return NULL;
+    }
+
+    char conninfo[256];
+    snprintf(conninfo, sizeof(conninfo),
+             "dbname=%s user=%s password=%s host=%s port=%s",
+             db_name, db_user, db_password, db_host, db_port);
+
+    PGconn *conn = PQconnectdb(conninfo);
+
+    if (PQstatus(conn) != CONNECTION_OK) {
+        fprintf(stderr, "Connection to database failed: %s", PQerrorMessage(conn));
+        PQfinish(conn);
+        return NULL;
+    }
+
+    return conn;
+}
+
+
+static void *handle_client(void *thread_context) {
+    ThreadContext *context = (ThreadContext *)thread_context;
+    int client_socket = context->client_socket;
 
     char *buffer = NULL;
     size_t buffer_size = 0;
@@ -75,7 +104,7 @@ static void *handle_client(void *client_socket_ptr) {
             printf("Headers:\n%s\n", request.headers ? request.headers : "");
             printf("Body: %s\n\n", request.body ? request.body : "");
 
-            send_http_response(&request, client_socket);
+            send_http_response(&request, context);
             free_http_request(&request);
         } else {
             printf("Rejected request\n");
@@ -85,13 +114,16 @@ static void *handle_client(void *client_socket_ptr) {
         free(buffer);
         close(client_socket);
     }
+    free(context);
     return NULL;
 }
 
 
 int server_init(Server *server, int port, int thread_pool_size) {
-    server->port = port;
-    server->thread_pool_size = thread_pool_size;
+    server->db_conn = connect_to_db();
+    if (!server->db_conn) {
+        return -1;
+    }
     server->server_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (server->server_socket == -1) {
         perror("Socket creation failed");
@@ -106,11 +138,13 @@ int server_init(Server *server, int port, int thread_pool_size) {
         perror("Bind failed");
         return -1;
     }
-
     if (listen(server->server_socket, 10) < 0) {
         perror("Listen failed");
         return -1;
     }
+
+    server->port = port;
+    server->thread_pool_size = thread_pool_size;
 
     return 0;
 }
@@ -152,28 +186,30 @@ void server_run(Server *server) {
             continue;
         }
 
-        int *client_socket = malloc(sizeof(int));
-        if (client_socket == NULL) {
-            perror("Failed to allocate memory for client socket");
-            continue;
-        }
-        *client_socket = accept(server->server_socket, (struct sockaddr *) &client_addr, &client_len);
-        if (*client_socket < 0) {
+        int client_socket;
+        client_socket = accept(server->server_socket, (struct sockaddr *) &client_addr, &client_len);
+        if (client_socket < 0) {
             if (errno == EINTR) {
-                free(client_socket);
                 continue;
             }
             perror("Accept failed");
-            free(client_socket);
             continue;
         }
 
         printf("New connection accepted\n");
+        ThreadContext *context = malloc(sizeof(ThreadContext));
+        if (!context) {
+            perror("Memory allocation failed");
+            close(client_socket);
+            continue;
+        }
+        context->client_socket = client_socket;
+        context->db_conn = server->db_conn;
 
-        if (pthread_create(&threads[thread_idx], NULL, handle_client, (void *) client_socket) != 0) {
+        if (pthread_create(&threads[thread_idx], NULL, handle_client, (void *) context) != 0) {
             perror("Failed to create client thread");
-            close(*client_socket);
-            free(client_socket);
+            close(client_socket);
+            free(context);
         } else {
             pthread_detach(threads[thread_idx]);
             thread_idx = (thread_idx + 1) % server->thread_pool_size;

@@ -20,5 +20,9 @@ RequestParsingStatus parse_http_request(char *buffer, HttpRequest *request);
 
 void free_http_request(HttpRequest *request);
 
+char* extract_form_value(const char* body, const char* key);
+
+char* url_decode(const char* src);
+
 
 #endif

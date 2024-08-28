@@ -1,4 +1,5 @@
 #include "response.h"
+#include "../todos.h"
 #include <arpa/inet.h>
 #include <string.h>
 #include <stdio.h>
@@ -10,12 +11,14 @@
 #define MAX_PATH_LENGTH 304
 #define DOCUMENT_ROOT "../src/http/www"
 
-static void get_home(int client_socket);
-static void get_about(int client_socket);
+static void get_home(HttpRequest *req, ThreadContext *context);
+static void get_about(HttpRequest *req, ThreadContext *context);
+static void create_todo(HttpRequest *req, ThreadContext *context);
 
 
 const Route ROUTES[] = { {"/", GET, get_home},
-                         {"/about", GET, get_about}
+                         {"/about", GET, get_about},
+                         {"/todo", POST, create_todo}
 };
 
 const int ROUTES_COUNT = sizeof(ROUTES) / sizeof(Route);
@@ -52,10 +55,22 @@ static int is_path_safe(const char *path) {
 
 static void send_headers(int client_socket, int status_code, const char *content_type, const char *other) {
     char response_header[1024];
+    char content_type_h[64];
+    if (!content_type) {
+        strcat(content_type_h, "");
+    } else {
+        snprintf(content_type_h, sizeof(content_type_h), "Content-Type: %s\r\n", content_type);
+    }
     if (!other) other = "";
 
     const char *status_text;
     switch (status_code) {
+        case 200:
+            status_text = "OK";
+            break;
+        case 201:
+            status_text = "Created";
+            break;
         case 400:
             status_text = "Bad Request";
             break;
@@ -68,6 +83,9 @@ static void send_headers(int client_socket, int status_code, const char *content
         case 405:
             status_text = "Method Not Allowed";
             break;
+        case 415:
+            status_text = "Unsupported Media Type";
+            break;
         case 500:
             status_text = "Internal Server Error";
             break;
@@ -76,10 +94,10 @@ static void send_headers(int client_socket, int status_code, const char *content
     }
 
     sprintf(response_header, "HTTP/1.1 %d %s\r\n"
-                             "Content-Type: %s\r\n"
+                             "%s"
                              "%s"
                              "\r\n",
-            status_code, status_text, content_type, other);
+            status_code, status_text, content_type_h, other);
 
     send(client_socket, response_header, strlen(response_header), 0);
 }
@@ -141,16 +159,86 @@ static void try_sending_file(int client_socket, const char *file_path) {
     close(fd);
 }
 
+// ROUTING
 
-static void get_home(int client_socket) {
+static void get_home(HttpRequest *req, ThreadContext *context) {
     const char *home_path = DOCUMENT_ROOT"/index.html";
-    try_sending_file(client_socket, home_path);
+    try_sending_file(context->client_socket, home_path);
 }
 
 
-static void get_about(int client_socket) {
+static void get_about(HttpRequest *req, ThreadContext *context) {
     const char *about_path = DOCUMENT_ROOT"/about.html";
-    try_sending_file(client_socket, about_path);
+    try_sending_file(context->client_socket, about_path);
+}
+
+
+static void create_todo(HttpRequest *req, ThreadContext *context) {
+    int client_socket = context->client_socket;
+    const char *headers = req->headers;
+    if (strstr(headers, "Content-Type: application/x-www-form-urlencoded") == NULL) {
+        try_sending_error(client_socket, 415);
+        return;
+    }
+    const char *body = req->body;
+    if (!body) {
+        try_sending_error(client_socket, 400);
+        return;
+    }
+
+    const char *expected_keys[] = {"summary", "task", "duetime"};
+    int num_expected_keys = sizeof(expected_keys) / sizeof(expected_keys[0]);
+
+    bool found_keys[num_expected_keys];
+    memset(found_keys, 0, sizeof(found_keys));
+
+    char *body_copy = strdup(body);
+    char *token, *rest = body_copy;
+    while ((token = strtok_r(rest, "&", &rest))) {
+        char *key = strtok(token, "=");
+        char *value = strtok(NULL, "=");
+
+        if (key && value) {
+            bool is_expected = false;
+            for (int i = 0; i < num_expected_keys; i++) {
+                if (strcmp(key, expected_keys[i]) == 0) {
+                    found_keys[i] = true;
+                    is_expected = true;
+                    break;
+                }
+            }
+            if (!is_expected) {
+                free(body_copy);
+                try_sending_error(client_socket, 400);
+                return;
+            }
+        }
+    }
+    free(body_copy);
+
+    if (!found_keys[0] || !found_keys[1]) {
+        try_sending_error(client_socket, 400);
+        return;
+    }
+
+    char *summary = extract_form_value(body, "summary");
+    char *task = extract_form_value(body, "task");
+    char *due_time = extract_form_value(body, "duetime");
+
+    Todo todo = {.summary = summary, .task = task, .due_time = due_time, .completed = false};
+
+    if (!db_create_todo(context->db_conn, &todo)) {
+        free(summary);
+        free(task);
+        if (due_time) free(due_time);
+        try_sending_error(client_socket, 500);
+        return;
+    }
+
+    send_headers(client_socket, 201, NULL, NULL);
+    free(summary);
+    free(task);
+    if (due_time) free(due_time);
 }
 
 
@@ -174,7 +262,8 @@ static int parse_request_method(const char *method) {
 }
 
 
-void send_http_response(HttpRequest *request, int client_socket) {
+void send_http_response(HttpRequest *request, ThreadContext *context) {
+    int client_socket = context->client_socket;
     int req_method = parse_request_method(request->method);
     if (req_method == -1) {
         try_sending_error(client_socket, 400);
@@ -187,7 +276,7 @@ void send_http_response(HttpRequest *request, int client_socket) {
             try_sending_error(client_socket, 405);
             return;
         }
-        route->handler(client_socket);
+        route->handler(request, context);
         return;
     } else {                                                            // static files
         if (req_method != GET) {

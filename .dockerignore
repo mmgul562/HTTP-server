@@ -1,0 +1,11 @@
+.idea
+
+cmake-build-debug
+
+.git
+.gitignore
+
+.docker
+
+README.md
+LICENSE

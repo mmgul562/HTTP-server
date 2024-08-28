@@ -15,5 +15,7 @@ int main() {
     server_run(&server);
 
     close(server.server_socket);
+    PQfinish(server.db_conn);
+
     return 0;
 }

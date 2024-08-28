@@ -4,6 +4,62 @@
 #include <stdlib.h>
 
 
+static char hex_to_char(char c) {
+    if (c >= '0' && c <= '9') return (char)(c - '0');
+    if (c >= 'a' && c <= 'f') return (char)(c - 'a' + 10);
+    if (c >= 'A' && c <= 'F') return (char)(c - 'A' + 10);
+    return -1;
+}
+
+
+char *url_decode(const char *src) {
+    size_t src_len = strlen(src);
+    char *decoded = malloc(src_len + 1);
+    size_t i, j;
+
+    for (i = 0, j = 0; i < src_len; ++i, ++j) {
+        if (src[i] == '%' && i + 2 < src_len) {
+            char high = hex_to_char(src[i + 1]);
+            char low = hex_to_char(src[i + 2]);
+            if (high >= 0 && low >= 0) {
+                decoded[j] = (char)((high << 4) | low);
+                i += 2;
+            } else {
+                decoded[j] = src[i];
+            }
+        } else if (src[i] == '+') {
+            decoded[j] = ' ';
+        } else {
+            decoded[j] = src[i];
+        }
+    }
+    decoded[j] = '\0';
+    return decoded;
+}
+
+
+char *extract_form_value(const char *body, const char *key) {
+    char search_key[256];
+    snprintf(search_key, sizeof(search_key), "%s=", key);
+
+    char *start = strstr(body, search_key);
+    if (!start) return NULL;
+    start += strlen(search_key);
+
+    char *end = strchr(start, '&');
+    if (!end) end = start + strlen(start);
+
+    size_t len = end - start;
+    char *value = malloc(len + 1);
+    strncpy(value, start, len);
+    value[len] = '\0';
+
+    char *decoded = url_decode(value);
+    free(value);
+    return decoded;
+}
+
+
 RequestParsingStatus parse_http_request(char *buffer, HttpRequest *request) {
     char *req_line_end = strstr(buffer, "\r\n");
     if (!req_line_end) {

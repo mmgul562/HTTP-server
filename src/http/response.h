@@ -2,6 +2,8 @@
 #define HTTP_SERVER_RESPONSE_H
 
 #include "request.h"
+#include "server.h"
+#include <libpq-fe.h>
 
 
 typedef enum {
@@ -13,10 +15,10 @@ typedef enum {
 typedef struct {
     const char *url;
     Method method;
-    void (*handler)(int client_socket);
+    void (*handler)(HttpRequest *, ThreadContext *);
 } Route;
 
-void send_http_response(HttpRequest *request, int client_socket);
+void send_http_response(HttpRequest *request, ThreadContext *context);
 
 void send_failure_response(RequestParsingStatus status, int client_socket);
 
