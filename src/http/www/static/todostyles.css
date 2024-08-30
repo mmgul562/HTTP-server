@@ -1,0 +1,148 @@
+body {
+    font-family: "Roboto", sans-serif;
+    min-height: 100vh;
+    margin: 0;
+    padding: 0;
+    background-color: #7c3c12;
+    background-image: linear-gradient(#7c3c12, #a45822);
+    background-size: cover;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+}
+
+main {
+    display: flex;
+    align-items: center;
+    flex-direction: column;
+    width: 60%;
+    margin: 2rem auto 6rem auto;
+    padding: 1em;
+    background-color: #DAA520;
+    text-align: center;
+    border-radius: 0.6rem;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+img {
+    height: 4rem;
+    width: auto;
+}
+
+#add-todo-btn {
+    background-color: transparent;
+    cursor: pointer;
+    outline: none;
+    border: none;
+    transition-duration: 0.25s;
+}
+
+#add-todo-btn:hover {
+    transform: scale(1.2);
+}
+
+h1 {
+    font-family: "Matemasie", sans-serif;
+    text-align: center;
+    margin: 1rem;
+    color: #fdfd7c;
+    font-size: 4rem;
+}
+
+p {
+    margin: 0.3rem;
+    color: #000;
+    font-size: inherit;
+}
+
+.todo-item {
+    width: 90%;
+    max-width: 80rem;
+    display: flex;
+    align-items: center;
+}
+
+.todo-details {
+    width: 90%;
+    max-height: 20rem;
+    background-color: #FFFF66;
+    margin: 1rem 0;
+    padding: 0.5em 1em 1em 1em;
+    border: 0.1rem solid #B8860B;
+    border-radius: 0.2rem;
+    position: relative;
+    cursor: pointer;
+    transition: max-height 0.3s ease;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+}
+
+.todo-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 1.2rem;
+    font-weight: bold;
+    color: #333;
+    margin-bottom: 0.8rem;
+}
+
+.todo-header time {
+    font-size: inherit;
+}
+
+.todo-summary {
+    text-align: left;
+    font-weight: bold;
+    margin-bottom: 0.5rem;
+    font-size: 2.5rem;
+}
+
+.todo-task {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+    text-align: left;
+    margin-top: 1rem;
+    font-size: 2rem;
+}
+
+.todo-details.expanded {
+    max-height: 100rem;
+}
+
+.todo-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+button.edit-btn,
+button.complete-btn {
+    background-color: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 2rem;
+    outline: none;
+    color: #008000;
+    transition-duration: 0.2s;
+}
+
+button.complete-btn {
+    color: #32CD32;
+}
+
+button.edit-btn:hover,
+button.complete-btn:hover {
+    transform: scale(1.2);
+}
+
+.creation-time, .due-time {
+    font-size: 0.8rem;
+}
+
+.due-time {
+    margin-left: auto;
+    font-weight: bold;
+}

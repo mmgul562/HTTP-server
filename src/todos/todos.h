@@ -6,13 +6,17 @@
 
 
 typedef struct {
+    char *creation_time;
     char *summary;
     char *task;
     char *due_time;
-    bool completed;
 } Todo;
 
 bool db_create_todo(PGconn *conn, Todo *todo);
+
+Todo *db_get_all_todos(PGconn *conn, int *count);
+
+void free_todos(Todo *todos, int count);
 
 
 #endif

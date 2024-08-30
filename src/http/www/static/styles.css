@@ -1,45 +1,73 @@
 body {
-    background-color: #343642;
-    color: #d6eaf5;
-    font-family: Arial, sans-serif;
-    line-height: 1.6;
+    background-color: #7c3c12;
+    background-image: linear-gradient(#7c3c12, #a45822);
+    background-size: cover;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+    font-family: "Roboto", sans-serif;
     margin: 0;
     padding: 0;
 }
 
-header {
-    background-color: #24272f;
-    padding: 0.5em;
-    text-align: center;
-    border-bottom: 0.2rem solid #102020;
-    margin-bottom: 1.5rem;
-}
-
 h1 {
-    font-size: 3rem;
-    margin: 0;
+    text-align: center;
+    font-size: 4rem;
+    margin: 0.5rem 0.5rem 2rem 0.5rem;
+    font-family: "Matemasie", sans-serif;
+    color: #fdfd7c;
 }
 
 main {
     padding: 0.5em;
-    max-width: 60rem;
+    max-width: 80rem;
     margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
 }
 
 section {
+    width: 100%;
     text-align: center;
-    box-shadow: 0.4em 0.25em 0.25em rgba(0, 0, 0, 0.25);
-    background-color: #222a48;
-    border-radius: 1em;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    background-color: #FFFF66;
+    border-radius: 0.6rem;
     padding: 2em;
 }
 
 h2 {
     margin-bottom: 1rem;
     font-size: 2.5rem;
+    color: #333;
 }
 
 p {
     margin-bottom: 1rem;
-    font-size: 1.8rem;
+    font-size: 2rem;
+    color: #000;
+}
+
+a {
+    text-decoration: none;
+    color: #fff;
+}
+
+#return-home-btn {
+    width: 30%;
+    background-color: #e3a725;
+    font-family: "Matemasie", sans-serif;
+    font-size: 2rem;
+    padding: 0.5em 1em;
+    border: none;
+    border-radius: 0.4rem;
+    cursor: pointer;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    transition: background-color 0.2s ease, transform 0.2s ease;
+    margin-top: 2rem;
+}
+
+#return-home-btn:hover {
+    background-color: #b8860b;
+    transform: scale(1.1);
 }

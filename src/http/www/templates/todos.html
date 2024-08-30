@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta http-equiv="X-UA-Compatible" content="IE=edge">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400..700&family=Matemasie&display=swap"
+				rel="stylesheet">
+	<link rel="stylesheet" href="todostyles.css">
+	<title>To-Do List</title>
+</head>
+<body>
+<h1>Your TO-DO List</h1>
+<main>
+	<button id="add-todo-btn"><img src="add-btn.png" alt="add-btn"></button>
+		<!-- TODO_ITEMS -->
+</main>
+
+<script>
+    function toggleExpand(element) {
+        const todoTask = element.querySelector('.todo-task');
+        if (element.classList.contains('expanded')) {
+            todoTask.style.maxHeight = 0;
+            element.classList.remove('expanded');
+        } else {
+            todoTask.style.maxHeight = todoTask.scrollHeight + 'px';
+            element.classList.add('expanded');
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const creationTimeElements = document.getElementsByClassName('creation-time');
+        if (creationTimeElements.length === 0) {
+            return;
+        }
+        const dueTimeElements = document.getElementsByClassName('due-time');
+        const options = {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+        };
+        for (const time of creationTimeElements) {
+            const creationTime = new Date(time.getAttribute('datetime'));
+            time.textContent = creationTime.toLocaleString(undefined, options);
+        }
+        for (const time of dueTimeElements) {
+            const dueTime = new Date(time.getAttribute('datetime'));
+            time.textContent = dueTime.toLocaleString(undefined, options);
+        }
+    });
+</script>
+</body>
+</html>

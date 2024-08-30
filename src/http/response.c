@@ -1,5 +1,5 @@
 #include "response.h"
-#include "../todos.h"
+#include "../todos/todos.h"
 #include <arpa/inet.h>
 #include <string.h>
 #include <stdio.h>
@@ -10,15 +10,21 @@
 
 #define MAX_PATH_LENGTH 304
 #define DOCUMENT_ROOT "../src/http/www"
+#define MAX_TEMPLATE_SIZE 4096
+#define MAX_TODOS_HTML_SIZE 10240
 
 static void get_home(HttpRequest *req, ThreadContext *context);
+
 static void get_about(HttpRequest *req, ThreadContext *context);
+
+static void get_todos(HttpRequest *req, ThreadContext *context);
+
 static void create_todo(HttpRequest *req, ThreadContext *context);
 
 
-const Route ROUTES[] = { {"/", GET, get_home},
-                         {"/about", GET, get_about},
-                         {"/todo", POST, create_todo}
+const Route ROUTES[] = {{"/",      GET,  get_todos},
+                        {"/",      POST, create_todo},
+                        {"/about", GET,  get_about},
 };
 
 const int ROUTES_COUNT = sizeof(ROUTES) / sizeof(Route);
@@ -34,6 +40,58 @@ static const char *get_content_type(const char *path) {
     if (strcmp(extension, ".png") == 0) return "image/png";
     if (strcmp(extension, ".gif") == 0) return "image/gif";
     return "application/octet-stream";
+}
+
+
+static char *read_template(const char *filename, const char *placeholder, char **remainder) {
+    FILE *file = fopen(filename, "r");
+    if (file == NULL) {
+        perror("Error opening template file");
+        return NULL;
+    }
+
+    char *buffer = malloc(MAX_TEMPLATE_SIZE);
+    size_t bytesRead = fread(buffer, 1, MAX_TEMPLATE_SIZE - 1, file);
+    buffer[bytesRead] = '\0';
+
+    fclose(file);
+
+    char *placeholder_pos = strstr(buffer, placeholder);
+    if (placeholder_pos) {
+        *placeholder_pos = '\0';
+        *remainder = placeholder_pos + strlen(placeholder);
+    } else {
+        *remainder = buffer + strlen(buffer);
+    }
+
+    return buffer;
+}
+
+
+static bool parse_form_data(const char *body, const char **expected_keys, int n_expected_keys, bool *found_keys) {
+    char *body_copy = strdup(body);
+    char *token, *rest = body_copy;
+    while ((token = strtok_r(rest, "&", &rest))) {
+        char *key = strtok(token, "=");
+        char *value = strtok(NULL, "=");
+
+        if (key && value) {
+            bool is_expected = false;
+            for (int i = 0; i < n_expected_keys; ++i) {
+                if (strcmp(key, expected_keys[i]) == 0) {
+                    found_keys[i] = true;
+                    is_expected = true;
+                    break;
+                }
+            }
+            if (!is_expected) {
+                free(body_copy);
+                return false;
+            }
+        }
+    }
+    free(body_copy);
+    return true;
 }
 
 
@@ -122,8 +180,8 @@ static void try_sending_error(int client_socket, int status_code) {
         if (status_code == 500) {
             send_headers(client_socket, 500, "text/html", NULL);
             const char err_msg[] = "<h1>Internal Server Error</h1>\r\n"
-                                "\t<p>Sorry, something went wrong on our side. Please try again later.</p>\r\n";
-            send(client_socket, err_msg,sizeof(err_msg), 0);
+                                   "\t<p>Sorry, something went wrong on our side. Please try again later.</p>\r\n";
+            send(client_socket, err_msg, sizeof(err_msg), 0);
         } else {
             try_sending_error(client_socket, 500);
         }
@@ -161,15 +219,66 @@ static void try_sending_file(int client_socket, const char *file_path) {
 
 // ROUTING
 
-static void get_home(HttpRequest *req, ThreadContext *context) {
-    const char *home_path = DOCUMENT_ROOT"/index.html";
-    try_sending_file(context->client_socket, home_path);
-}
-
-
 static void get_about(HttpRequest *req, ThreadContext *context) {
     const char *about_path = DOCUMENT_ROOT"/about.html";
     try_sending_file(context->client_socket, about_path);
+}
+
+
+static void get_todos(HttpRequest *req, ThreadContext *context) {
+    int count;
+    Todo *todos = db_get_all_todos(context->db_conn, &count);
+
+    if (!todos) {
+        try_sending_error(context->client_socket, 500);
+        return;
+    }
+
+    char *remainder;
+    const char *template_path = DOCUMENT_ROOT"/templates/todos.html";
+    char *template = read_template(template_path, "<!-- TODO_ITEMS -->", &remainder);
+    if (!template) {
+        try_sending_error(context->client_socket, 500);
+        free_todos(todos, count);
+        return;
+    }
+
+    char *todos_html = malloc(MAX_TODOS_HTML_SIZE);
+    char *p = todos_html;
+    for (int i = 0; i < count; i++) {
+        p += sprintf(p,
+                     "<div class=\"todo-item\">"
+                     "<div class=\"todo-details\" onclick=\"toggleExpand(this)\">"
+                     "<header class=\"todo-header\">"
+                     "<p><time datetime=\"%s\" class=\"creation-time\"></time></p>", todos[i].creation_time);
+        if (todos[i].due_time) {
+            p += sprintf(p, "<p>Due: <time datetime=\"%s\" class=\"due-time\"></time></p>", todos[i].due_time);
+        }
+        p += sprintf(p,
+                     "</header>"
+                     "<div class=\"todo-summary\">"
+                     "<p>%s</p>"
+                     "</div><div class=\"todo-task\">"
+                     "<p>%s</p>"
+                     "</div></div>"
+                     "<div class=\"todo-buttons\">"
+                     "<button class=\"edit-btn\">✏️</button>"
+                     "<button class=\"complete-btn\">✅</button>"
+                     "</div></div>",
+                     todos[i].summary,
+                     todos[i].task);
+    }
+
+    send_headers(context->client_socket, 200, "text/html", NULL);
+    send(context->client_socket, template, strlen(template), 0);
+    if (count != 0) {
+        send(context->client_socket, todos_html, strlen(todos_html), 0);
+    }
+    send(context->client_socket, remainder, strlen(remainder), 0);
+
+    free(template);
+    free(todos_html);
+    free_todos(todos, count);
 }
 
 
@@ -192,29 +301,10 @@ static void create_todo(HttpRequest *req, ThreadContext *context) {
     bool found_keys[num_expected_keys];
     memset(found_keys, 0, sizeof(found_keys));
 
-    char *body_copy = strdup(body);
-    char *token, *rest = body_copy;
-    while ((token = strtok_r(rest, "&", &rest))) {
-        char *key = strtok(token, "=");
-        char *value = strtok(NULL, "=");
-
-        if (key && value) {
-            bool is_expected = false;
-            for (int i = 0; i < num_expected_keys; i++) {
-                if (strcmp(key, expected_keys[i]) == 0) {
-                    found_keys[i] = true;
-                    is_expected = true;
-                    break;
-                }
-            }
-            if (!is_expected) {
-                free(body_copy);
-                try_sending_error(client_socket, 400);
-                return;
-            }
-        }
+    if (!parse_form_data(body, expected_keys, num_expected_keys, found_keys)) {
+        try_sending_error(client_socket, 400);
+        return;
     }
-    free(body_copy);
 
     if (!found_keys[0] || !found_keys[1]) {
         try_sending_error(client_socket, 400);
@@ -225,7 +315,7 @@ static void create_todo(HttpRequest *req, ThreadContext *context) {
     char *task = extract_form_value(body, "task");
     char *due_time = extract_form_value(body, "duetime");
 
-    Todo todo = {.summary = summary, .task = task, .due_time = due_time, .completed = false};
+    Todo todo = {.summary = summary, .task = task, .due_time = due_time};
 
     if (!db_create_todo(context->db_conn, &todo)) {
         free(summary);
@@ -242,9 +332,9 @@ static void create_todo(HttpRequest *req, ThreadContext *context) {
 }
 
 
-static const Route* check_route(const char *url) {
+static const Route *check_route(const char *url, Method method) {
     for (int i = 0; i < ROUTES_COUNT; ++i) {
-        if (strcmp(url, ROUTES[i].url) == 0) {
+        if (strcmp(url, ROUTES[i].url) == 0 && method == ROUTES[i].method) {
             return &ROUTES[i];
         }
     }
@@ -270,15 +360,11 @@ void send_http_response(HttpRequest *request, ThreadContext *context) {
         return;
     }
 
-    const Route *route = check_route(request->path);
-    if (route) {                                                        // routed files
-        if (req_method != route->method) {
-            try_sending_error(client_socket, 405);
-            return;
-        }
+    const Route *route = check_route(request->path, req_method);
+    if (route) {                                                                // routed files
         route->handler(request, context);
         return;
-    } else {                                                            // static files
+    } else {                                                                    // static files
         if (req_method != GET) {
             try_sending_error(client_socket, 405);
             return;

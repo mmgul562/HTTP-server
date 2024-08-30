@@ -14,8 +14,8 @@ add_executable(HTTP_server src/main.c
         src/http/server.h
         src/http/response.c
         src/http/response.h
-        src/todos.c
-        src/todos.h
+        src/todos/todos.c
+        src/todos/todos.h
 )
 
 target_link_libraries(HTTP_server ${PostgreSQL_LIBRARIES})
