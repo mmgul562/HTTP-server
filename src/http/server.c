@@ -8,9 +8,21 @@
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
+#include <ctype.h>
+
+#define MAX_QUEUE_SIZE 100
 
 
 volatile sig_atomic_t keep_running = 1;
+pthread_t *threads = NULL;
+int thread_count = 0;
+pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t queue_cond = PTHREAD_COND_INITIALIZER;
+
+Task task_queue[MAX_QUEUE_SIZE];
+int queue_size = 0;
+int queue_front = 0;
+int queue_rear = -1;
 
 static void signal_handler(int signum) {
     keep_running = 0;
@@ -46,75 +58,128 @@ static PGconn *connect_to_db() {
 }
 
 
-static void *handle_client(void *thread_context) {
-    ThreadContext *context = (ThreadContext *)thread_context;
-    int client_socket = context->client_socket;
+static void enqueue_task(Task task) {
+    pthread_mutex_lock(&queue_mutex);
+    if (queue_size < MAX_QUEUE_SIZE) {
+        queue_rear = (queue_rear + 1) % MAX_QUEUE_SIZE;
+        task_queue[queue_rear] = task;
+        queue_size++;
+        pthread_cond_signal(&queue_cond);
+    }
+    pthread_mutex_unlock(&queue_mutex);
+}
 
-    char *buffer = NULL;
-    size_t buffer_size = 0;
-    size_t total_bytes = 0;
+
+static Task dequeue_task() {
+    Task task;
+    pthread_mutex_lock(&queue_mutex);
+    while (queue_size == 0 && keep_running) {
+        pthread_cond_wait(&queue_cond, &queue_mutex);
+    }
+    if (queue_size > 0) {
+        task = task_queue[queue_front];
+        queue_front = (queue_front + 1) % MAX_QUEUE_SIZE;
+        queue_size--;
+    } else {
+        task.client_socket = -1;
+    }
+    pthread_mutex_unlock(&queue_mutex);
+    return task;
+}
+
+
+static ssize_t receive_full_request(int client_socket, char **request_buffer, size_t *buffer_size) {
+    ssize_t total_bytes = 0;
     ssize_t bytes_received;
+    size_t content_length = 0;
+    int headers_end = 0;
+    char *header_end = NULL;
 
     while (1) {
-        buffer_size += 1024;
-        char *new_buffer = realloc(buffer, buffer_size);
-        if (!new_buffer) {
-            perror("Failed to allocate memory");
-            free(buffer);
-            close(client_socket);
-            return NULL;
+        if (total_bytes + 1024 > *buffer_size) {
+            *buffer_size += 1024;
+            char *new_buffer = realloc(*request_buffer, *buffer_size);
+            if (!new_buffer) {
+                perror("Failed to allocate memory");
+                return -1;
+            }
+            *request_buffer = new_buffer;
         }
-        buffer = new_buffer;
 
-        bytes_received = recv(client_socket, buffer + total_bytes, buffer_size - total_bytes - 1, 0);
+        bytes_received = recv(client_socket, *request_buffer + total_bytes, *buffer_size - total_bytes - 1, 0);
 
         if (bytes_received < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 continue;
             } else {
                 perror("recv failed");
-                free(buffer);
-                close(client_socket);
-                return NULL;
+                return -1;
             }
         } else if (bytes_received == 0) {
             break;
         }
-        total_bytes += bytes_received;
 
-        if (strstr(buffer, "\r\n\r\n")) {
+        total_bytes += bytes_received;
+        (*request_buffer)[total_bytes] = '\0';
+
+        if (!headers_end) {
+            header_end = strstr(*request_buffer, "\r\n\r\n");
+            if (header_end) {
+                headers_end = 1;
+                char *content_length_header = strstr(*request_buffer, "Content-Length:");
+                if (content_length_header) {
+                    content_length_header += 15;
+                    while (isspace(*content_length_header)) content_length_header++;
+                    content_length = strtoul(content_length_header, NULL, 10);
+                }
+            }
+        }
+
+        if (headers_end && total_bytes >= (size_t)(header_end - *request_buffer + 4 + content_length)) {
             break;
         }
-        if (total_bytes >= buffer_size - 1) {
-            continue;
-        }
     }
 
-    if (total_bytes > 0) {
-        buffer[total_bytes] = '\0';
-        HttpRequest request;
-        memset(&request, 0, sizeof(HttpRequest));
+    return total_bytes;
+}
 
-        RequestParsingStatus status = parse_http_request(buffer, &request);
-        if (status == REQ_PARSE_SUCCESS) {
-            printf("Received request:\n");
-            printf("Method: %s\n", request.method);
-            printf("Path: %s\n", request.path);
-            printf("Protocol: %s\n", request.protocol);
-            printf("Headers:\n%s\n", request.headers ? request.headers : "");
-            printf("Body: %s\n\n", request.body ? request.body : "");
 
-            send_http_response(&request, context);
-            free_http_request(&request);
-        } else {
-            printf("Rejected request\n");
-            send_failure_response(status, client_socket);
+static void *worker_thread(void *null) {
+    while (keep_running) {
+        Task task = dequeue_task();
+        int client_socket = task.client_socket;
+        if (client_socket == -1) {
+            break;
         }
 
-        free(buffer);
+        char *request_buffer = NULL;
+        size_t buffer_size = 0;
+        ssize_t total_bytes = receive_full_request(client_socket, &request_buffer, &buffer_size);
+
+        if (total_bytes > 0) {
+            HttpRequest request;
+            memset(&request, 0, sizeof(HttpRequest));
+
+            RequestParsingStatus status = parse_http_request(request_buffer, &request);
+            if (status == REQ_PARSE_SUCCESS) {
+                printf("Received request:\n");
+                printf("Method: %s\n", request.method);
+                printf("Path: %s\n", request.path);
+                printf("Protocol: %s\n", request.protocol);
+                printf("Headers:\n%s\n", request.headers ? request.headers : "");
+                printf("Body: %s\n\n", request.body ? request.body : "");
+
+                send_http_response(&request, &task);
+                free_http_request(&request);
+            } else {
+                printf("Rejected request\n");
+                send_failure_response(status, client_socket);
+            }
+        }
+
+        free(request_buffer);
         close(client_socket);
     }
-    free(context);
     return NULL;
 }
 
@@ -145,6 +210,17 @@ int server_init(Server *server, int port, int thread_pool_size) {
 
     server->port = port;
     server->thread_pool_size = thread_pool_size;
+    threads = calloc(thread_pool_size, sizeof(pthread_t));
+    if (!threads) {
+        perror("Failed to allocate memory for threads");
+        return -1;
+    }
+    for (int i = 0; i < thread_pool_size; i++) {
+        if (pthread_create(&threads[i], NULL, worker_thread, NULL) != 0) {
+            perror("Failed to create worker thread");
+            return -1;
+        }
+    }
 
     return 0;
 }
@@ -153,12 +229,11 @@ int server_init(Server *server, int port, int thread_pool_size) {
 void server_run(Server *server) {
     printf("Server listening on port %d\n", server->port);
 
-    pthread_t threads[server->thread_pool_size];
-    int thread_idx = 0;
-
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
 
@@ -186,8 +261,7 @@ void server_run(Server *server) {
             continue;
         }
 
-        int client_socket;
-        client_socket = accept(server->server_socket, (struct sockaddr *) &client_addr, &client_len);
+        int client_socket = accept(server->server_socket, (struct sockaddr *) &client_addr, &client_len);
         if (client_socket < 0) {
             if (errno == EINTR) {
                 continue;
@@ -197,24 +271,19 @@ void server_run(Server *server) {
         }
 
         printf("New connection accepted\n");
-        ThreadContext *context = malloc(sizeof(ThreadContext));
-        if (!context) {
-            perror("Memory allocation failed");
-            close(client_socket);
-            continue;
-        }
-        context->client_socket = client_socket;
-        context->db_conn = server->db_conn;
-
-        if (pthread_create(&threads[thread_idx], NULL, handle_client, (void *) context) != 0) {
-            perror("Failed to create client thread");
-            close(client_socket);
-            free(context);
-        } else {
-            pthread_detach(threads[thread_idx]);
-            thread_idx = (thread_idx + 1) % server->thread_pool_size;
-        }
+        Task new_task = {client_socket, server->db_conn};
+        enqueue_task(new_task);
     }
+
+    for (int i = 0; i < server->thread_pool_size; i++) {
+        Task exit_task = {-1, NULL};
+        enqueue_task(exit_task);
+    }
+
+    for (int i = 0; i < server->thread_pool_size; i++) {
+        pthread_join(threads[i], NULL);
+    }
+    free(threads);
 
     printf("Server shutting down...\n");
 }

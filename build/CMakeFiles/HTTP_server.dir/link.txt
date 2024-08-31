@@ -1,0 +1,1 @@
+/usr/bin/cc CMakeFiles/HTTP_server.dir/src/main.c.o CMakeFiles/HTTP_server.dir/src/http/request.c.o CMakeFiles/HTTP_server.dir/src/http/server.c.o CMakeFiles/HTTP_server.dir/src/http/response.c.o CMakeFiles/HTTP_server.dir/src/todos/todos.c.o -o HTTP_server  /usr/lib/x86_64-linux-gnu/libpq.so 

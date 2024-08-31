@@ -1,4 +1,5 @@
 FROM ubuntu:24.04
+
 LABEL maintainer="mmgul562"
 
 RUN apt-get update && apt-get install -y \

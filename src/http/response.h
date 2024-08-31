@@ -15,10 +15,10 @@ typedef enum {
 typedef struct {
     const char *url;
     Method method;
-    void (*handler)(HttpRequest *, ThreadContext *);
+    void (*handler)(HttpRequest *, Task *);
 } Route;
 
-void send_http_response(HttpRequest *request, ThreadContext *context);
+void send_http_response(HttpRequest *request, Task *context);
 
 void send_failure_response(RequestParsingStatus status, int client_socket);
 

@@ -13,13 +13,13 @@
 #define MAX_TEMPLATE_SIZE 4096
 #define MAX_TODOS_HTML_SIZE 10240
 
-static void get_home(HttpRequest *req, ThreadContext *context);
+static void get_home(HttpRequest *req, Task *context);
 
-static void get_about(HttpRequest *req, ThreadContext *context);
+static void get_about(HttpRequest *req, Task *context);
 
-static void get_todos(HttpRequest *req, ThreadContext *context);
+static void get_todos(HttpRequest *req, Task *context);
 
-static void create_todo(HttpRequest *req, ThreadContext *context);
+static void create_todo(HttpRequest *req, Task *context);
 
 
 const Route ROUTES[] = {{"/",      GET,  get_todos},
@@ -219,13 +219,13 @@ static void try_sending_file(int client_socket, const char *file_path) {
 
 // ROUTING
 
-static void get_about(HttpRequest *req, ThreadContext *context) {
+static void get_about(HttpRequest *req, Task *context) {
     const char *about_path = DOCUMENT_ROOT"/about.html";
     try_sending_file(context->client_socket, about_path);
 }
 
 
-static void get_todos(HttpRequest *req, ThreadContext *context) {
+static void get_todos(HttpRequest *req, Task *context) {
     int count;
     Todo *todos = db_get_all_todos(context->db_conn, &count);
 
@@ -282,7 +282,7 @@ static void get_todos(HttpRequest *req, ThreadContext *context) {
 }
 
 
-static void create_todo(HttpRequest *req, ThreadContext *context) {
+static void create_todo(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
     const char *headers = req->headers;
     if (strstr(headers, "Content-Type: application/x-www-form-urlencoded") == NULL) {
@@ -352,7 +352,7 @@ static int parse_request_method(const char *method) {
 }
 
 
-void send_http_response(HttpRequest *request, ThreadContext *context) {
+void send_http_response(HttpRequest *request, Task *context) {
     int client_socket = context->client_socket;
     int req_method = parse_request_method(request->method);
     if (req_method == -1) {

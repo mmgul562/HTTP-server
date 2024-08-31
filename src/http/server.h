@@ -8,7 +8,7 @@
 typedef struct {
     int client_socket;
     PGconn *db_conn;
-} ThreadContext;
+} Task;
 
 typedef struct {
     int server_socket;
