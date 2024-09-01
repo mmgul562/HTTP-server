@@ -10,10 +10,8 @@
 
 #define MAX_PATH_LENGTH 304
 #define DOCUMENT_ROOT "../src/http/www"
-#define MAX_TEMPLATE_SIZE 4096
+#define MAX_TEMPLATE_SIZE 8192
 #define MAX_TODOS_HTML_SIZE 10240
-
-static void get_home(HttpRequest *req, Task *context);
 
 static void get_about(HttpRequest *req, Task *context);
 

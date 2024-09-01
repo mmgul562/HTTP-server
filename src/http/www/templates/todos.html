@@ -15,44 +15,31 @@
 <h1>Your TO-DO List</h1>
 <main>
 	<button id="add-todo-btn"><img src="add-btn.png" alt="add-btn"></button>
-		<!-- TODO_ITEMS -->
+	<!-- TODO_ITEMS -->
 </main>
 
-<script>
-    function toggleExpand(element) {
-        const todoTask = element.querySelector('.todo-task');
-        if (element.classList.contains('expanded')) {
-            todoTask.style.maxHeight = 0;
-            element.classList.remove('expanded');
-        } else {
-            todoTask.style.maxHeight = todoTask.scrollHeight + 'px';
-            element.classList.add('expanded');
-        }
-    }
+<div id="popup-form" class="popup-form hidden">
+	<div class="form-container">
+		<h2>Add New To-Do</h2>
+		<form id="todo-form">
+			<label for="summary">Summary:</label>
+			<input type="text" id="summary" name="summary" placeholder="Enter Summary" maxlength="128" required>
 
-    document.addEventListener('DOMContentLoaded', () => {
-        const creationTimeElements = document.getElementsByClassName('creation-time');
-        if (creationTimeElements.length === 0) {
-            return;
-        }
-        const dueTimeElements = document.getElementsByClassName('due-time');
-        const options = {
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false
-        };
-        for (const time of creationTimeElements) {
-            const creationTime = new Date(time.getAttribute('datetime'));
-            time.textContent = creationTime.toLocaleString(undefined, options);
-        }
-        for (const time of dueTimeElements) {
-            const dueTime = new Date(time.getAttribute('datetime'));
-            time.textContent = dueTime.toLocaleString(undefined, options);
-        }
-    });
-</script>
+			<label for="task">Task:</label>
+			<textarea id="task" name="task" placeholder="Enter Task" maxlength="2048" required></textarea>
+
+			<label for="due-time">Due Time (optional):</label>
+			<input type="datetime-local" id="due-time" name="due-time">
+
+			<button type="submit" class="submit-btn">Submit</button>
+			<button type="button" class="close-btn">Close</button>
+		</form>
+	</div>
+</div>
+<div id="success-popup" class="success-popup hidden">
+	<p>To-Do added successfully!</p>
+</div>
+
+<script src="todoscript.js"></script>
 </body>
 </html>

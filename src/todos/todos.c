@@ -5,7 +5,7 @@
 
 
 Todo *db_get_all_todos(PGconn *conn, int *count) {
-    const char *query = "SELECT id, creation_time, summary, task, due_time FROM todos ORDER BY id";
+    const char *query = "SELECT id, creation_time, summary, task, due_time FROM todos ORDER BY -id";
     PGresult *res = PQexec(conn, query);
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
         fprintf(stderr, "SELECT failed: %s", PQerrorMessage(conn));
