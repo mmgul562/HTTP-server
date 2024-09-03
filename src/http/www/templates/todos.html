@@ -19,8 +19,8 @@
 </main>
 
 <div id="popup-form" class="popup-form hidden">
-	<div class="form-container">
-		<h2>Add New To-Do</h2>
+	<div id="form-container">
+		<h2 id="form-title"></h2>
 		<form id="todo-form">
 			<label for="summary">Summary:</label>
 			<input type="text" id="summary" name="summary" placeholder="Enter Summary" maxlength="128" required>
@@ -31,14 +31,22 @@
 			<label for="due-time">Due Time (optional):</label>
 			<input type="datetime-local" id="due-time" name="due-time">
 
-			<button type="submit" class="submit-btn">Submit</button>
-			<button type="button" class="close-btn">Close</button>
+			<button type="submit" id="submit-btn">Submit</button>
+			<button type="button" id="close-btn">Close</button>
 		</form>
 	</div>
 </div>
-<div id="success-popup" class="success-popup hidden">
-	<p>To-Do added successfully!</p>
+<div id="confirmation-popup" class="confirmation-popup hidden">
+	<div id="confirmation-container">
+		<p>Are you sure you want to mark this To-Do as completed? (It will be deleted afterward)</p>
+		<div id="confirmation-buttons">
+			<button id="confirm-complete-btn">Complete</button>
+			<button id="cancel-complete-btn">Cancel</button>
+		</div>
+	</div>
 </div>
+<div id="success-popup" class="success-popup hidden"></div>
+<div id="failure-popup" class="failure-popup hidden"></div>
 
 <script src="todoscript.js"></script>
 </body>

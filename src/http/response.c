@@ -2,6 +2,7 @@
 #include "../todos/todos.h"
 #include <arpa/inet.h>
 #include <string.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -19,10 +20,15 @@ static void get_todos(HttpRequest *req, Task *context);
 
 static void create_todo(HttpRequest *req, Task *context);
 
+static void delete_todo(HttpRequest *req, Task *context);
 
-const Route ROUTES[] = {{"/",      GET,  get_todos},
-                        {"/",      POST, create_todo},
-                        {"/about", GET,  get_about},
+static void update_todo(HttpRequest *req, Task *context);
+
+const Route ROUTES[] = {{"/",      GET,    get_todos},
+                        {"/",      POST,   create_todo},
+                        {"/",      PATCH,  update_todo},
+                        {"/",      DELETE, delete_todo},
+                        {"/about", GET,    get_about},
 };
 
 const int ROUTES_COUNT = sizeof(ROUTES) / sizeof(Route);
@@ -63,6 +69,35 @@ static char *read_template(const char *filename, const char *placeholder, char *
     }
 
     return buffer;
+}
+
+
+static bool parse_and_validate_form_data(const char *body, const char **expected_keys, int n_expected_keys, bool *found_keys) {
+    if (!body) return false;
+
+    char *body_copy = strdup(body);
+    char *token, *rest = body_copy;
+    while ((token = strtok_r(rest, "&", &rest))) {
+        char *key = strtok(token, "=");
+        char *value = strtok(NULL, "=");
+
+        if (key && value) {
+            bool is_expected = false;
+            for (int i = 0; i < n_expected_keys; ++i) {
+                if (strcmp(key, expected_keys[i]) == 0) {
+                    found_keys[i] = true;
+                    is_expected = true;
+                    break;
+                }
+            }
+            if (!is_expected) {
+                free(body_copy);
+                return false;
+            }
+        }
+    }
+    free(body_copy);
+    return true;
 }
 
 
@@ -109,6 +144,24 @@ static int is_path_safe(const char *path) {
 }
 
 
+static bool validate_url_id(const char *url_id, int *id) {
+    size_t url_len = strlen(url_id);
+    for (int i = 0; i < url_len; ++i) {
+        if (!isdigit(*(url_id + i))) {
+            return false;
+        }
+    }
+
+    *id = atoi(url_id);
+    if (*id < 0) {
+        return false;
+    } else if (*id == 0 && strcmp(url_id, "0") != 0) {
+        return false;
+    }
+    return true;
+}
+
+
 static void send_headers(int client_socket, int status_code, const char *content_type, const char *other) {
     char response_header[1024];
     char content_type_h[64];
@@ -121,32 +174,14 @@ static void send_headers(int client_socket, int status_code, const char *content
 
     const char *status_text;
     switch (status_code) {
-        case 200:
-            status_text = "OK";
-            break;
-        case 201:
-            status_text = "Created";
-            break;
-        case 400:
-            status_text = "Bad Request";
-            break;
-        case 403:
-            status_text = "Forbidden";
-            break;
-        case 404:
-            status_text = "Not Found";
-            break;
-        case 405:
-            status_text = "Method Not Allowed";
-            break;
-        case 415:
-            status_text = "Unsupported Media Type";
-            break;
-        case 500:
-            status_text = "Internal Server Error";
-            break;
-        default:
-            status_text = "Internal Server Error";
+        case 200: status_text = "OK"; break;
+        case 201: status_text = "Created"; break;
+        case 400: status_text = "Bad Request"; break;
+        case 403: status_text = "Forbidden"; break;
+        case 404: status_text = "Not Found"; break;
+        case 405: status_text = "Method Not Allowed"; break;
+        case 415: status_text = "Unsupported Media Type"; break;
+        default: status_text = "Internal Server Error"; status_code = 500;
     }
 
     sprintf(response_header, "HTTP/1.1 %d %s\r\n"
@@ -243,12 +278,12 @@ static void get_todos(HttpRequest *req, Task *context) {
 
     char *todos_html = malloc(MAX_TODOS_HTML_SIZE);
     char *p = todos_html;
-    for (int i = 0; i < count; i++) {
+    for (int i = 0; i < count; ++i) {
         p += sprintf(p,
-                     "<div class=\"todo-item\">"
+                     "<div class=\"todo-item\" data-todo-id=\"%d\">"
                      "<div class=\"todo-details\" onclick=\"toggleExpand(this)\">"
                      "<header class=\"todo-header\">"
-                     "<p><time datetime=\"%s\" class=\"creation-time\"></time></p>", todos[i].creation_time);
+                     "<p><time datetime=\"%s\" class=\"creation-time\"></time></p>", todos[i].id, todos[i].creation_time);
         if (todos[i].due_time) {
             p += sprintf(p, "<p>Due: <time datetime=\"%s\" class=\"due-time\"></time></p>", todos[i].due_time);
         }
@@ -283,28 +318,19 @@ static void get_todos(HttpRequest *req, Task *context) {
 static void create_todo(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
     const char *headers = req->headers;
+    const char *body = req->body;
+
     if (strstr(headers, "Content-Type: application/x-www-form-urlencoded") == NULL) {
         try_sending_error(client_socket, 415);
-        return;
-    }
-    const char *body = req->body;
-    if (!body) {
-        try_sending_error(client_socket, 400);
         return;
     }
 
     const char *expected_keys[] = {"summary", "task", "duetime"};
     int num_expected_keys = sizeof(expected_keys) / sizeof(expected_keys[0]);
-
     bool found_keys[num_expected_keys];
     memset(found_keys, 0, sizeof(found_keys));
 
-    if (!parse_form_data(body, expected_keys, num_expected_keys, found_keys)) {
-        try_sending_error(client_socket, 400);
-        return;
-    }
-
-    if (!found_keys[0] || !found_keys[1]) {
+    if (!parse_and_validate_form_data(body, expected_keys, num_expected_keys, found_keys) || !found_keys[0] || !found_keys[1]) {
         try_sending_error(client_socket, 400);
         return;
     }
@@ -330,10 +356,94 @@ static void create_todo(HttpRequest *req, Task *context) {
 }
 
 
+static void update_todo(HttpRequest *req, Task *context) {
+    int client_socket = context->client_socket;
+    const char *headers = req->headers;
+    const char *body = req->body;
+
+    if (strstr(headers, "Content-Type: application/x-www-form-urlencoded") == NULL) {
+        try_sending_error(client_socket, 415);
+        return;
+    }
+
+    if (strlen(req->path) == 1) {
+        try_sending_error(client_socket, 500);
+        return;
+    }
+
+    int id;
+    if (!validate_url_id(req->path + 1, &id)) {
+        try_sending_error(client_socket, 400);
+        return;
+    }
+
+    const char *expected_keys[] = {"summary", "task", "duetime"};
+    int num_expected_keys = sizeof(expected_keys) / sizeof(expected_keys[0]);
+    bool found_keys[num_expected_keys];
+    memset(found_keys, 0, sizeof(found_keys));
+
+    if (!parse_and_validate_form_data(body, expected_keys, num_expected_keys, found_keys) || !found_keys[0] || !found_keys[1]) {
+        try_sending_error(client_socket, 400);
+        return;
+    }
+
+    char *summary = extract_form_value(body, "summary");
+    char *task = extract_form_value(body, "task");
+    char *due_time = extract_form_value(body, "duetime");
+
+    Todo todo = {.id = id, .summary = summary, .task = task, .due_time = due_time};
+
+    if (!db_update_todo(context->db_conn, &todo)) {
+        free(summary);
+        free(task);
+        if (due_time) free(due_time);
+        try_sending_error(client_socket, 404);
+        return;
+    }
+
+    send_headers(client_socket, 200, NULL, NULL);
+    free(summary);
+    free(task);
+    if (due_time) free(due_time);
+}
+
+
+static void delete_todo(HttpRequest *req, Task *context) {
+    int client_socket = context->client_socket;
+
+    if (strlen(req->path) == 1) {
+        try_sending_error(client_socket, 400);
+        return;
+    }
+
+    int id;
+    if (!validate_url_id(req->path + 1, &id)) {
+        try_sending_error(client_socket, 400);
+        return;
+    }
+
+    if (!db_delete_todo(context->db_conn, id)) {
+        try_sending_error(client_socket, 404);
+        return;
+    }
+    send_headers(client_socket, 200, NULL, NULL);
+}
+
+
 static const Route *check_route(const char *url, Method method) {
-    for (int i = 0; i < ROUTES_COUNT; ++i) {
-        if (strcmp(url, ROUTES[i].url) == 0 && method == ROUTES[i].method) {
-            return &ROUTES[i];
+    if (method == DELETE || method == PATCH) {
+        const char *route_url;
+        for (int i = 0; i < ROUTES_COUNT; ++i) {
+            route_url = ROUTES[i].url;
+            if (strncmp(url, route_url, strlen(route_url)) == 0 && method == ROUTES[i].method) {
+                return &ROUTES[i];
+            }
+        }
+    } else {
+        for (int i = 0; i < ROUTES_COUNT; ++i) {
+            if (strcmp(url, ROUTES[i].url) == 0 && method == ROUTES[i].method) {
+                return &ROUTES[i];
+            }
         }
     }
     return NULL;
@@ -345,6 +455,10 @@ static int parse_request_method(const char *method) {
         return GET;
     } else if (strcmp(method, "POST") == 0) {
         return POST;
+    } else if (strcmp(method, "DELETE") == 0) {
+        return DELETE;
+    } else if (strcmp(method, "PATCH") == 0) {
+        return PATCH;
     }
     return -1;
 }

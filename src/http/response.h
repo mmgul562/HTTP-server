@@ -8,8 +8,9 @@
 
 typedef enum {
     GET,
-    POST
-    // will add other later
+    POST,
+    DELETE,
+    PATCH
 } Method;
 
 typedef struct {
