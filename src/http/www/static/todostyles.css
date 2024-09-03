@@ -149,6 +149,34 @@ button.complete-btn:hover {
     font-weight: bold;
 }
 
+.pagination-info {
+    font-family: "Roboto", sans-serif;
+}
+
+.pagination-controls {
+    font-family: "Roboto", sans-serif;
+}
+
+.pagination-controls button {
+    background-color: #77591d;
+    padding: 0.3em 0.4em;
+    margin: 0.2rem 0.6rem;
+    border: none;
+    border-radius: 0.4rem;
+    cursor: pointer;
+    font-size: 1.2rem;
+    transition: background-color 0.2s ease;
+}
+
+.pagination-controls button:hover {
+    background-color: #5b4211;;
+}
+
+.pagination-controls a {
+    text-decoration: none;
+    color: white;
+}
+
 .popup-form {
     display: flex;
     justify-content: center;

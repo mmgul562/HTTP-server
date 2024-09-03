@@ -4,8 +4,25 @@
 #include <string.h>
 
 
-Todo *db_get_all_todos(PGconn *conn, int *count) {
-    const char *query = "SELECT id, creation_time, summary, task, due_time FROM todos ORDER BY -id";
+int db_get_total_todos_count(PGconn *conn) {
+    const char *query = "SELECT COUNT(*) FROM todos";
+    PGresult *res = PQexec(conn, query);
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        fprintf(stderr, "COUNT failed: %s", PQerrorMessage(conn));
+        PQclear(res);
+        return -1;
+    }
+    int count = atoi(PQgetvalue(res, 0, 0));
+    PQclear(res);
+    return count;
+}
+
+
+Todo *db_get_all_todos(PGconn *conn, int *count, int page, int page_size) {
+    char query[128];
+    sprintf(query, "SELECT id, creation_time, summary, task, due_time FROM todos "
+                   "ORDER BY -id LIMIT %d OFFSET %d",
+                   page_size, (page - 1) * page_size);
     PGresult *res = PQexec(conn, query);
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
         fprintf(stderr, "SELECT failed: %s", PQerrorMessage(conn));

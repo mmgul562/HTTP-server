@@ -70,6 +70,12 @@ RequestParsingStatus parse_http_request(char *buffer, HttpRequest *request) {
     char *method = strtok(buffer, " ");
     char *path = strtok(NULL, " ");
     char *protocol = strtok(NULL, " ");
+    char *query_string_path = strtok(path, "?");
+    char *query_string = NULL;
+    if (query_string_path) {
+        path = query_string_path;
+        query_string = strtok(NULL, "\n");
+    }
     if (!method || !path || !protocol) {
         return REQ_PARSE_INVALID_FORMAT;
     }
@@ -83,6 +89,7 @@ RequestParsingStatus parse_http_request(char *buffer, HttpRequest *request) {
     }
     strcpy(request->method, method);
     strcpy(request->path, path);
+    if (query_string) request->query_string = strdup(query_string);
     strcpy(request->protocol, protocol);
 
     *req_line_end = '\r';
@@ -95,6 +102,7 @@ RequestParsingStatus parse_http_request(char *buffer, HttpRequest *request) {
         request->headers = malloc(headers_length + 1);
         if (!request->headers) {
             perror("Failed to allocate memory for request headers");
+            if (request->query_string) free(request->query_string);
             return REQ_PARSE_MEMORY_FAILURE;
         }
         strcpy(request->headers, req_line_end);
@@ -106,6 +114,7 @@ RequestParsingStatus parse_http_request(char *buffer, HttpRequest *request) {
         } else {
             request->body = malloc(body_length + 1);
             if (!request->body) {
+                if (request->query_string) free(request->query_string);
                 perror("Failed to allocate memory for request body");
                 return REQ_PARSE_MEMORY_FAILURE;
             }
@@ -122,6 +131,9 @@ RequestParsingStatus parse_http_request(char *buffer, HttpRequest *request) {
 
 
 void free_http_request(HttpRequest *request) {
+    if (request->query_string) {
+        free(request->query_string);
+    }
     if (request->headers) {
         free(request->headers);
     }

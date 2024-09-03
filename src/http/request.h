@@ -4,6 +4,7 @@
 
 typedef struct {
     char method[8];
+    char *query_string;
     char path[256];
     char protocol[16];
     char *headers;

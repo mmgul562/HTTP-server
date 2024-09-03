@@ -12,7 +12,8 @@
 #define MAX_PATH_LENGTH 304
 #define DOCUMENT_ROOT "../src/http/www"
 #define MAX_TEMPLATE_SIZE 8192
-#define MAX_TODOS_HTML_SIZE 10240
+#define PAGE_SIZE 8
+#define MAX_TODOS_HTML_SIZE 20240
 
 static void get_about(HttpRequest *req, Task *context);
 
@@ -75,33 +76,6 @@ static char *read_template(const char *filename, const char *placeholder, char *
 static bool parse_and_validate_form_data(const char *body, const char **expected_keys, int n_expected_keys, bool *found_keys) {
     if (!body) return false;
 
-    char *body_copy = strdup(body);
-    char *token, *rest = body_copy;
-    while ((token = strtok_r(rest, "&", &rest))) {
-        char *key = strtok(token, "=");
-        char *value = strtok(NULL, "=");
-
-        if (key && value) {
-            bool is_expected = false;
-            for (int i = 0; i < n_expected_keys; ++i) {
-                if (strcmp(key, expected_keys[i]) == 0) {
-                    found_keys[i] = true;
-                    is_expected = true;
-                    break;
-                }
-            }
-            if (!is_expected) {
-                free(body_copy);
-                return false;
-            }
-        }
-    }
-    free(body_copy);
-    return true;
-}
-
-
-static bool parse_form_data(const char *body, const char **expected_keys, int n_expected_keys, bool *found_keys) {
     char *body_copy = strdup(body);
     char *token, *rest = body_copy;
     while ((token = strtok_r(rest, "&", &rest))) {
@@ -259,12 +233,32 @@ static void get_about(HttpRequest *req, Task *context) {
 
 
 static void get_todos(HttpRequest *req, Task *context) {
+    int client_socket = context->client_socket;
+    int page = 1;
+
+    if (req->query_string) {
+        const char *expected_keys[] = {"page"};
+        bool found_keys[1] = {0};
+        if (!parse_and_validate_form_data(req->query_string, expected_keys, 1, found_keys)) {
+            try_sending_error(client_socket, 400);
+            return;
+        }
+        page = atoi(extract_form_value(req->query_string, "page"));
+        if (page < 1) page = 1;
+    }
+
     int count;
-    Todo *todos = db_get_all_todos(context->db_conn, &count);
+    Todo *todos = db_get_all_todos(context->db_conn, &count, page, PAGE_SIZE);
 
     if (!todos) {
-        try_sending_error(context->client_socket, 500);
+        try_sending_error(client_socket, 500);
         return;
+    }
+
+    int total_count = db_get_total_todos_count(context->db_conn);
+    int total_pages = 1;
+    if (total_count > 0) {
+        total_pages = (total_count + PAGE_SIZE - 1) / PAGE_SIZE;
     }
 
     char *remainder;
@@ -301,6 +295,26 @@ static void get_todos(HttpRequest *req, Task *context) {
                      todos[i].summary,
                      todos[i].task);
     }
+
+    p += sprintf(p,
+        "<div class=\"pagination-info\">"
+        "<p>Page %d of %d</p>"
+        "<p>Showing %d-%d of %d todos</p>"
+        "</div>"
+        "<div class=\"pagination-controls\">",
+        page, total_pages,
+        (page - 1) * PAGE_SIZE + 1,
+        (page - 1) * PAGE_SIZE + count,
+        total_count
+    );
+
+    if (page > 1) {
+        p += sprintf(p, "<button><a href=\"/?page=%d\">Previous</a></button>", page - 1);
+    }
+    if (page < total_pages) {
+        p += sprintf(p, "<button><a href=\"/?page=%d\">Next</a></button>", page + 1);
+    }
+    sprintf(p, "</div>");
 
     send_headers(context->client_socket, 200, "text/html", NULL);
     send(context->client_socket, template, strlen(template), 0);
