@@ -110,8 +110,12 @@ p {
     font-size: 2rem;
 }
 
+.expanded .todo-task{
+    overflow: auto;
+}
+
 .todo-details.expanded {
-    max-height: 100rem;
+    max-height: 80rem;
 }
 
 .todo-buttons {

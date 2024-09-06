@@ -45,9 +45,11 @@ document.addEventListener('DOMContentLoaded', () => {
             setTimeout(() => {
                 hidePopup(popupId);
                 location.reload();
-            }, 2000);
+            }, 1200);
         } else {
-            hidePopup(popupId);
+            setTimeout(() => {
+                hidePopup(popupId)
+            }, 1200);
         }
     };
 

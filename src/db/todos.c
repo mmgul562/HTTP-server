@@ -6,9 +6,11 @@
 
 int db_get_total_todos_count(PGconn *conn) {
     const char *query = "SELECT COUNT(*) FROM todos";
+
     PGresult *res = PQexec(conn, query);
+
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-        fprintf(stderr, "COUNT failed: %s", PQerrorMessage(conn));
+        fprintf(stderr, "Counting TODOs failed: %s", PQerrorMessage(conn));
         PQclear(res);
         return -1;
     }
@@ -23,9 +25,11 @@ Todo *db_get_all_todos(PGconn *conn, int *count, int page, int page_size) {
     sprintf(query, "SELECT id, creation_time, summary, task, due_time FROM todos "
                    "ORDER BY -id LIMIT %d OFFSET %d",
                    page_size, (page - 1) * page_size);
+
     PGresult *res = PQexec(conn, query);
+
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-        fprintf(stderr, "SELECT failed: %s", PQerrorMessage(conn));
+        fprintf(stderr, "TODO retrieval failed: %s", PQerrorMessage(conn));
         PQclear(res);
         return NULL;
     }
@@ -63,10 +67,9 @@ static bool db_create_todo_no_duetime(PGconn *conn, Todo *todo) {
     PGresult *res = PQexecParams(conn, query, 2, NULL, params, param_lengths, param_formats, 0);
 
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-        fprintf(stderr, "INSERT failed: %s", PQerrorMessage(conn));
+        fprintf(stderr, "TODO creation failed: %s", PQerrorMessage(conn));
         return false;
     }
-
     PQclear(res);
     return true;
 }
@@ -84,10 +87,9 @@ bool db_create_todo(PGconn *conn, Todo *todo) {
     PGresult *res = PQexecParams(conn, query, 3, NULL, params, param_lengths, param_formats, 0);
 
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-        fprintf(stderr, "INSERT failed: %s", PQerrorMessage(conn));
+        fprintf(stderr, "TODO creation failed: %s", PQerrorMessage(conn));
         return false;
     }
-
     PQclear(res);
     return true;
 }
@@ -104,10 +106,9 @@ static bool db_update_todo_no_duetime(PGconn *conn, Todo *todo) {
     PGresult *res = PQexecParams(conn, query, 3, NULL, params, param_lengths, param_formats, 0);
 
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-        fprintf(stderr, "UPDATE failed: %s", PQerrorMessage(conn));
+        fprintf(stderr, "TODO updating failed: %s", PQerrorMessage(conn));
         return false;
     }
-
     PQclear(res);
     return true;
 }
@@ -127,13 +128,11 @@ bool db_update_todo(PGconn *conn, Todo *todo) {
     PGresult *res = PQexecParams(conn, query, 4, NULL, params, param_lengths, param_formats, 0);
 
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-        fprintf(stderr, "UPDATE failed: %s", PQerrorMessage(conn));
+        fprintf(stderr, "TODO updating failed: %s", PQerrorMessage(conn));
         return false;
     }
-
     int affected_rows = atoi(PQcmdTuples(res));
     PQclear(res);
-
     return affected_rows > 0;
 }
 
@@ -147,13 +146,11 @@ bool db_delete_todo(PGconn *conn, int id) {
     PGresult *res = PQexecParams(conn, query, 1, NULL, param_values, NULL, NULL, 0);
 
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-        fprintf(stderr, "DELETE failed: %s", PQerrorMessage(conn));
+        fprintf(stderr, "TODO deletion failed: %s", PQerrorMessage(conn));
         PQclear(res);
         return false;
     }
-
     int affected_rows = atoi(PQcmdTuples(res));
     PQclear(res);
-
     return affected_rows > 0;
 }
