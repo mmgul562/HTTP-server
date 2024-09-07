@@ -2,8 +2,15 @@
 #define HTTP_SERVER_REQUEST_H
 
 
+typedef enum {
+    GET,
+    POST,
+    DELETE,
+    PATCH
+} Method;
+
 typedef struct {
-    char method[8];
+    Method method;
     char *query_string;
     char path[256];
     char protocol[16];
@@ -21,9 +28,7 @@ RequestParsingStatus parse_http_request(char *buffer, HttpRequest *request);
 
 void free_http_request(HttpRequest *request);
 
-char* extract_form_value(const char* body, const char* key);
-
-char* url_decode(const char* src);
+char *extract_url_param(const char *body, const char *key);
 
 
 #endif

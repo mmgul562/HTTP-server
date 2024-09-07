@@ -2,26 +2,15 @@
 #define HTTP_SERVER_RESPONSE_H
 
 #include "request.h"
-#include "server.h"
-#include <libpq-fe.h>
 
 
-typedef enum {
-    GET,
-    POST,
-    DELETE,
-    PATCH
-} Method;
+void send_headers(int client_socket, int status_code, const char *content_type, const char *other);
 
-typedef struct {
-    const char *url;
-    Method method;
-    void (*handler)(HttpRequest *, Task *);
-} Route;
+void try_sending_error(int client_socket, int status_code);
 
-void send_http_response(HttpRequest *request, Task *context);
+void try_sending_file(int client_socket, const char *file_path);
 
-void send_failure_response(RequestParsingStatus status, int client_socket);
+void handle_invalid_http_request(RequestParsingStatus status, int client_socket);
 
 
 #endif

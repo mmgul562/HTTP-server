@@ -2,13 +2,7 @@
 #define HTTP_SERVER_SERVER_H
 
 #include <arpa/inet.h>
-#include <libpq-fe.h>
-
-
-typedef struct {
-    int client_socket;
-    PGconn *db_conn;
-} Task;
+#include "util/task.h"
 
 typedef struct {
     int server_socket;

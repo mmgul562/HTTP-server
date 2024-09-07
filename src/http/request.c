@@ -12,7 +12,21 @@ static char hex_to_char(char c) {
 }
 
 
-char *url_decode(const char *src) {
+static int convert_method_str(const char *method) {
+    if (strcmp(method, "GET") == 0) {
+        return GET;
+    } else if (strcmp(method, "POST") == 0) {
+        return POST;
+    } else if (strcmp(method, "DELETE") == 0) {
+        return DELETE;
+    } else if (strcmp(method, "PATCH") == 0) {
+        return PATCH;
+    }
+    return -1;
+}
+
+
+static char *url_decode(const char *src) {
     size_t src_len = strlen(src);
     char *decoded = malloc(src_len + 1);
     size_t i, j;
@@ -38,7 +52,7 @@ char *url_decode(const char *src) {
 }
 
 
-char *extract_form_value(const char *body, const char *key) {
+char *extract_url_param(const char *body, const char *key) {
     char search_key[256];
     snprintf(search_key, sizeof(search_key), "%s=", key);
 
@@ -67,27 +81,28 @@ RequestParsingStatus parse_http_request(char *buffer, HttpRequest *request) {
     }
     *req_line_end = '\0';
 
-    char *method = strtok(buffer, " ");
+    char *method_str = strtok(buffer, " ");
     char *path = strtok(NULL, " ");
     char *protocol = strtok(NULL, " ");
     char *query_string_path = strtok(path, "?");
     char *query_string = NULL;
     if (query_string_path) {
         path = query_string_path;
-        query_string = strtok(NULL, "\n");
+        query_string = strtok(NULL, "\r");
     }
-    if (!method || !path || !protocol) {
+    if (!method_str || !path || !protocol) {
         return REQ_PARSE_INVALID_FORMAT;
     }
 
-    if (strlen(method) >= sizeof(request->method) ||
+    if (strlen(method_str) >= 8 ||
         strlen(path) >= sizeof(request->path) ||
         path[0] != '/' ||
         strlen(protocol) >= sizeof(request->protocol) ||
         strncmp(protocol, "HTTP/", 5) != 0) {
         return REQ_PARSE_INVALID_FORMAT;
     }
-    strcpy(request->method, method);
+    Method method = convert_method_str(method_str);
+    request->method = method;
     strcpy(request->path, path);
     if (query_string) request->query_string = strdup(query_string);
     strcpy(request->protocol, protocol);

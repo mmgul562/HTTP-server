@@ -1,6 +1,5 @@
 #include "server.h"
-#include "request.h"
-#include "response.h"
+#include "route.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,7 +14,6 @@
 
 volatile sig_atomic_t keep_running = 1;
 pthread_t *threads = NULL;
-int thread_count = 0;
 pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t queue_cond = PTHREAD_COND_INITIALIZER;
 
@@ -92,7 +90,7 @@ static ssize_t receive_full_request(int client_socket, char **request_buffer, si
     ssize_t total_bytes = 0;
     ssize_t bytes_received;
     size_t content_length = 0;
-    int headers_end = 0;
+    bool headers_end = false;
     char *header_end = NULL;
 
     while (1) {
@@ -100,7 +98,7 @@ static ssize_t receive_full_request(int client_socket, char **request_buffer, si
             *buffer_size += 1024;
             char *new_buffer = realloc(*request_buffer, *buffer_size);
             if (!new_buffer) {
-                perror("Failed to allocate memory");
+                perror("Failed to allocate memory for the new request buffer");
                 return -1;
             }
             *request_buffer = new_buffer;
@@ -125,7 +123,7 @@ static ssize_t receive_full_request(int client_socket, char **request_buffer, si
         if (!headers_end) {
             header_end = strstr(*request_buffer, "\r\n\r\n");
             if (header_end) {
-                headers_end = 1;
+                headers_end = true;
                 char *content_length_header = strstr(*request_buffer, "Content-Length:");
                 if (content_length_header) {
                     content_length_header += 15;
@@ -134,12 +132,10 @@ static ssize_t receive_full_request(int client_socket, char **request_buffer, si
                 }
             }
         }
-
-        if (headers_end && total_bytes >= (size_t)(header_end - *request_buffer + 4 + content_length)) {
+        if (headers_end && total_bytes >= (size_t)(header_end + 4 - *request_buffer + content_length)) {
             break;
         }
     }
-
     return total_bytes;
 }
 
@@ -163,20 +159,19 @@ static void *worker_thread(void *null) {
             RequestParsingStatus status = parse_http_request(request_buffer, &request);
             if (status == REQ_PARSE_SUCCESS) {
                 printf("Received request:\n");
-                printf("Method: %s\n", request.method);
+                printf("Method: %d\n", request.method);
                 printf("Path: %s\n", request.path);
                 printf("Protocol: %s\n", request.protocol);
                 printf("Headers:\n%s\n", request.headers ? request.headers : "");
                 printf("Body: %s\n\n", request.body ? request.body : "");
 
-                send_http_response(&request, &task);
+                handle_http_request(&request, &task);
                 free_http_request(&request);
             } else {
                 printf("Rejected request\n");
-                send_failure_response(status, client_socket);
+                handle_invalid_http_request(status, client_socket);
             }
         }
-
         free(request_buffer);
         close(client_socket);
     }
@@ -221,7 +216,6 @@ int server_init(Server *server, int port, int thread_pool_size) {
             return -1;
         }
     }
-
     return 0;
 }
 

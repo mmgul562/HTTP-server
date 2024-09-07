@@ -1,7 +1,8 @@
 #ifndef HTTP_SERVER_SESSION_MIDDLEWARE_H
 #define HTTP_SERVER_SESSION_MIDDLEWARE_H
 
-#include "../http/response.h"
+#include "../http/request.h"
+#include "../http/util/task.h"
 
 
 int check_session(HttpRequest *req, Task *context);

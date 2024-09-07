@@ -23,6 +23,9 @@ add_executable(HTTP_server src/main.c
         src/db/sessions.h
         src/middlewares/session_middleware.c
         src/middlewares/session_middleware.h
+        src/http/util/task.h
+        src/http/route.c
+        src/http/route.h
 )
 
 target_link_libraries(HTTP_server ${PostgreSQL_LIBRARIES} argon2 OpenSSL::Crypto)
