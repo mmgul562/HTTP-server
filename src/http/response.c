@@ -28,9 +28,9 @@ static void get_todo_page(HttpRequest *req, Task *context);
 
 static void create_todo(HttpRequest *req, Task *context);
 
-static void delete_todo(HttpRequest *req, Task *context);
-
 static void update_todo(HttpRequest *req, Task *context);
+
+static void delete_todo(HttpRequest *req, Task *context);
 
 static void get_user_page(HttpRequest *req, Task *context);
 
@@ -44,8 +44,8 @@ const Route ROUTES[] = {
         {"/",            GET,    get_home},
         {"/todo",        GET,    get_todo_page},
         {"/todo",        POST,   create_todo},
-        {"/todo",        PATCH,  update_todo},
-        {"/todo",        DELETE, delete_todo},
+        {"/todo/",        PATCH,  update_todo},
+        {"/todo/",        DELETE, delete_todo},
         {"/user",        GET,    get_user_page},
         {"/user/signup", POST,   signup_user},
         {"/user/login",  POST,   login_user},
@@ -313,7 +313,7 @@ static void try_sending_file(int client_socket, const char *file_path) {
 // ROUTING
 
 static void get_home(HttpRequest *req, Task *context) {
-    if (!check_session(req, context)) {
+    if (check_session(req, context) < 0) {
         get_user_page(req, context);
     } else {
         get_todo_page(req, context);
@@ -329,7 +329,8 @@ static void get_about(HttpRequest *req, Task *context) {
 
 static void get_todo_page(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
-    if (!check_session(req, context)) {
+    int user_id = check_session(req, context);
+    if (user_id < 0) {
         try_sending_error(client_socket, 401);
         return;
     }
@@ -347,7 +348,7 @@ static void get_todo_page(HttpRequest *req, Task *context) {
     }
 
     int count;
-    Todo *todos = db_get_all_todos(context->db_conn, &count, page, PAGE_SIZE);
+    Todo *todos = db_get_all_todos(context->db_conn, user_id, &count, page, PAGE_SIZE);
 
     if (!todos) {
         try_sending_error(client_socket, 500);
@@ -431,7 +432,8 @@ static void get_todo_page(HttpRequest *req, Task *context) {
 
 static void create_todo(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
-    if (!check_session(req, context)) {
+    int user_id = check_session(req, context);
+    if (user_id < 0) {
         try_sending_error(client_socket, 401);
         return;
     }
@@ -464,7 +466,7 @@ static void create_todo(HttpRequest *req, Task *context) {
         return;
     }
 
-    Todo todo = {.summary = summary, .task = task, .due_time = due_time};
+    Todo todo = {.user_id = user_id, .summary = summary, .task = task, .due_time = due_time};
 
     if (!db_create_todo(context->db_conn, &todo)) {
         free(summary);
@@ -483,7 +485,8 @@ static void create_todo(HttpRequest *req, Task *context) {
 
 static void update_todo(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
-    if (!check_session(req, context)) {
+    int user_id = check_session(req, context);
+    if (user_id < 0) {
         try_sending_error(client_socket, 401);
         return;
     }
@@ -495,13 +498,13 @@ static void update_todo(HttpRequest *req, Task *context) {
         return;
     }
 
-    if (strlen(req->path) == 1) {
+    if (strlen(req->path) == 6) {                           // no id after /todo/
         try_sending_error(client_socket, 500);
         return;
     }
 
     int id;
-    if (!validate_url_id(req->path + 1, &id)) {
+    if (!validate_url_id(req->path + 6, &id)) {
         try_sending_error(client_socket, 400);
         return;
     }
@@ -527,7 +530,7 @@ static void update_todo(HttpRequest *req, Task *context) {
         return;
     }
 
-    Todo todo = {.id = id, .summary = summary, .task = task, .due_time = due_time};
+    Todo todo = {.id = id, .user_id = user_id, .summary = summary, .task = task, .due_time = due_time};
 
     if (!db_update_todo(context->db_conn, &todo)) {
         free(summary);
@@ -546,18 +549,19 @@ static void update_todo(HttpRequest *req, Task *context) {
 
 static void delete_todo(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
-    if (!check_session(req, context)) {
+    int user_id = check_session(req, context);
+    if (user_id < 0) {
         try_sending_error(client_socket, 401);
         return;
     }
 
-    if (strlen(req->path) == 1) {
+    if (strlen(req->path) == 6) {
         try_sending_error(client_socket, 400);
         return;
     }
 
     int id;
-    if (!validate_url_id(req->path + 1, &id)) {
+    if (!validate_url_id(req->path + 6, &id)) {
         try_sending_error(client_socket, 400);
         return;
     }

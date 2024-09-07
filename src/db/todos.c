@@ -20,11 +20,12 @@ int db_get_total_todos_count(PGconn *conn) {
 }
 
 
-Todo *db_get_all_todos(PGconn *conn, int *count, int page, int page_size) {
+Todo *db_get_all_todos(PGconn *conn, int user_id, int *count, int page, int page_size) {
     char query[128];
     sprintf(query, "SELECT id, creation_time, summary, task, due_time FROM todos "
+                   "WHERE user_id = %d "
                    "ORDER BY -id LIMIT %d OFFSET %d",
-                   page_size, (page - 1) * page_size);
+                   user_id, page_size, (page - 1) * page_size);
 
     PGresult *res = PQexec(conn, query);
 
@@ -59,12 +60,22 @@ void free_todos(Todo *todos, int count) {
 
 
 static bool db_create_todo_no_duetime(PGconn *conn, Todo *todo) {
-    const char *params[2] = {todo->summary, todo->task};
-    const char *query = "INSERT INTO todos (summary, task) VALUES ($1, $2)";
-    int param_lengths[2] = {strlen(todo->summary), strlen(todo->task)};
-    int param_formats[2] = {0, 0};
+    const char *query = "INSERT INTO todos (user_id, summary, task) VALUES ($1, $2, $3)";
+    const char *params[3];
+    int param_lengths[3];
+    int param_formats[3] = {0, 0, 0};
+    char user_id_str[12];
 
-    PGresult *res = PQexecParams(conn, query, 2, NULL, params, param_lengths, param_formats, 0);
+    snprintf(user_id_str, sizeof(user_id_str), "%d", todo->user_id);
+    params[0] = user_id_str;
+    params[1] = todo->summary;
+    params[2] = todo->task;
+
+    param_lengths[0] = strlen(user_id_str);
+    param_lengths[1] = strlen(todo->summary);
+    param_lengths[2] = strlen(todo->task);
+
+    PGresult *res = PQexecParams(conn, query, 3, NULL, params, param_lengths, param_formats, 0);
 
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
         fprintf(stderr, "TODO creation failed: %s", PQerrorMessage(conn));
@@ -79,12 +90,24 @@ bool db_create_todo(PGconn *conn, Todo *todo) {
     if (!todo->due_time) {
         return db_create_todo_no_duetime(conn, todo);
     }
-    const char *params[3] = {todo->summary, todo->task, todo->due_time};
-    const char *query = "INSERT INTO todos (summary, task, due_time) VALUES ($1, $2, $3)";
-    int param_lengths[3] = {strlen(todo->summary), strlen(todo->task), strlen(todo->due_time)};
-    int param_formats[3] = {0, 0, 0};
+    const char *query = "INSERT INTO todos (user_id, summary, task, due_time) VALUES ($1, $2, $3, $4)";
+    const char *params[4];
+    int param_lengths[4];
+    int param_formats[4] = {0, 0, 0, 0};
+    char user_id_str[12];
 
-    PGresult *res = PQexecParams(conn, query, 3, NULL, params, param_lengths, param_formats, 0);
+    snprintf(user_id_str, sizeof(user_id_str), "%d", todo->user_id);
+    params[0] = user_id_str;
+    params[1] = todo->summary;
+    params[2] = todo->task;
+    params[3] = todo->due_time;
+
+    param_lengths[0] = strlen(user_id_str);
+    param_lengths[1] = strlen(todo->summary);
+    param_lengths[2] = strlen(todo->task);
+    param_lengths[3] = strlen(todo->due_time);
+
+    PGresult *res = PQexecParams(conn, query, 4, NULL, params, param_lengths, param_formats, 0);
 
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
         fprintf(stderr, "TODO creation failed: %s", PQerrorMessage(conn));

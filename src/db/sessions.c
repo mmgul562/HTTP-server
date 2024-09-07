@@ -61,8 +61,8 @@ bool db_create_session(PGconn *conn, int user_id, char *token) {
 }
 
 
-bool db_validate_session(PGconn *conn, const char *token) {
-    const char *query = "SELECT id FROM sessions WHERE token = $1 AND expires_at > NOW()";
+int db_validate_session(PGconn *conn, const char *token) {
+    const char *query = "SELECT user_id FROM sessions WHERE token = $1 AND expires_at > NOW()";
     const char *params[1] = {token};
     int param_lengths[1] = {strlen(token)};
     int param_formats[1] = {0};
@@ -71,16 +71,18 @@ bool db_validate_session(PGconn *conn, const char *token) {
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
         fprintf(stderr, "Session validation failed: %s", PQerrorMessage(conn));
         PQclear(res);
-        return false;
+        return -1;
     }
 
     if (PQntuples(res) == 0) {
         fprintf(stderr, "No session with provided token found\n");
         PQclear(res);
-        return false;
+        return -1;
     }
+
+    int user_id = atoi(PQgetvalue(res, 0, 0));
     PQclear(res);
-    return true;
+    return user_id;
 }
 
 

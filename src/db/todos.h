@@ -2,11 +2,11 @@
 #define HTTP_SERVER_TODOS_H
 
 #include <libpq-fe.h>
-#include <stdbool.h>
 
 
 typedef struct {
     int id;
+    int user_id;
     char *creation_time;
     char *summary;
     char *task;
@@ -15,7 +15,7 @@ typedef struct {
 
 int db_get_total_todos_count(PGconn *conn);
 
-Todo *db_get_all_todos(PGconn *conn, int *count, int page, int page_size);
+Todo *db_get_all_todos(PGconn *conn, int user_id, int *count, int page, int page_size);
 
 bool db_create_todo(PGconn *conn, Todo *todo);
 

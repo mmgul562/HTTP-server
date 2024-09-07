@@ -66,7 +66,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const todoIndex = this.dataset.todoIndex;
         const todoId = document.querySelectorAll('.todo-item')[todoIndex].dataset.todoId;
 
-        fetch(`/${todoId}`, { method: 'DELETE' })
+        fetch(`/todo/${todoId}`, { method: 'DELETE' })
             .then(response => {
                 hidePopup('confirmation-popup');
                 handleResponse(response, 'To-Do completed!', 'Failed to complete a To-Do');
@@ -127,7 +127,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const todoIndex = this.dataset.todoIndex;
         const todoId = isEditMode ? document.querySelectorAll('.todo-item')[todoIndex].dataset.todoId : '';
 
-        fetch(isEditMode ? `/${todoId}` : '/', {
+        fetch(isEditMode ? `/todo/${todoId}` : '/todo', {
             method: isEditMode ? 'PATCH' : 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: formData.toString()

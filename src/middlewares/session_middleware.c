@@ -5,16 +5,16 @@
 #define MAX_TOKEN_LENGTH 65
 
 
-bool check_session(HttpRequest *req, Task *context) {
+int check_session(HttpRequest *req, Task *context) {
     const char *cookie_header = strstr(req->headers, "\r\nCookie: ");
     if (!cookie_header) {
         fprintf(stderr, "No Cookie Header found\n");
-        return false;
+        return -1;
     }
 
     char session_token[MAX_TOKEN_LENGTH] = {0};
     if (!extract_session_token(cookie_header, session_token, sizeof(session_token))) {
-        return false;
+        return -1;
     }
 
     return db_validate_session(context->db_conn, session_token);

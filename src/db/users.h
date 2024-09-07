@@ -2,7 +2,6 @@
 #define HTTP_SERVER_USERS_H
 
 #include <libpq-fe.h>
-#include <stdbool.h>
 
 
 typedef struct {

@@ -31,6 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById(btnId).addEventListener('click', () => {
             showPopup('popup-form');
             document.getElementById('form-title').textContent = formTitle;
+            document.getElementById('auth-form').reset();
 
             const form = document.getElementById('auth-form');
             form.onsubmit = (event) => {
@@ -45,7 +46,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     headers: {'Content-Type': 'application/x-www-form-urlencoded'},
                     body: formData.toString()
                 })
-                    .then(response => handleResponse(response, `${formTitle} successful!`, `${formTitle} failed`))
+                    .then(response => {
+                        hidePopup('popup-form');
+                        handleResponse(response, `${formTitle} successful!`, `${formTitle} failed`)
+                    })
                     .catch(handleError);
             };
         });
