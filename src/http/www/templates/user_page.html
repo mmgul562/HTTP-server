@@ -10,10 +10,17 @@
 	<link
 			href="https://fonts.googleapis.com/css2?family=Matemasie&family=Roboto:ital,wght@0,100;0,300;0,400;0,500;0,700;0,900;1,100;1,300;1,400;1,500;1,700;1,900&display=swap"
 			rel="stylesheet">
-	<link rel="stylesheet" href="/user_styles.css">
+	<link rel="stylesheet" href="/styles/user_styles.css">
+	<link rel="stylesheet" href="/styles/base.css">
+	<link rel="stylesheet" href="/styles/form-base.css">
 </head>
 <body>
 <h1>Manage Your Account</h1>
+<header id="main-header">
+	<a href="/"><img src="/images/home.png" alt="home"></a>
+	<a href="/user"><img src="/images/user.png" alt="user"></a>
+	<a href="/about"><img src="/images/about.png" alt="about"></a>
+</header>
 <main>
 	<section class="credentials-container">
 		<div class="email-container">
@@ -53,14 +60,15 @@
 	<div id="confirmation-container">
 		<p>Are you sure you want to delete your account?</p>
 		<div id="confirmation-buttons">
-			<button id="confirm-delete-btn">Confirm (DELETE)</button>
-			<button id="cancel-delete-btn">Cancel</button>
+			<button id="confirm-btn">Confirm (DELETE)</button>
+			<button id="cancel-btn">Cancel</button>
 		</div>
 	</div>
 </div>
 <div id="success-popup" class="success-popup hidden"></div>
 <div id="failure-popup" class="failure-popup hidden"></div>
 
-<script src="/user_script.js"></script>
+<script src="/scripts/base.js"></script>
+<script src="/scripts/user_script.js"></script>
 </body>
 </html>

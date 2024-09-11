@@ -1,0 +1,60 @@
+body {
+    font-family: "Caveat", sans-serif;
+    min-height: 100vh;
+    margin: 0;
+    padding: 0;
+    background-color: #7c3c12;
+    background-image: linear-gradient(#7c3c12, #a45822);
+    background-size: cover;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+}
+
+main {
+    display: flex;
+    align-items: center;
+    flex-direction: column;
+    width: 60%;
+    margin: 2rem auto 6rem auto;
+    padding: 1em;
+    background-color: #DAA520;
+    text-align: center;
+    border-radius: 0.6rem;
+    box-shadow: 0 0.2rem 0.6rem rgba(0, 0, 0, 0.2);
+}
+
+#main-header {
+    max-width: 10rem;
+    background-color: #DAA520;
+    padding: 0.5em 1em;
+    position: fixed;
+    top: 1rem;
+    left: 1rem;
+    z-index: 100;
+    box-shadow: 0 0.2rem 0.6rem rgba(0, 0, 0, 0.2);
+}
+
+#main-header img {
+    height: 3.5rem;
+    display: block;
+    margin: 0.5rem;
+    transition-duration: 0.2s;
+}
+
+#main-header img:hover {
+    transform: scale(1.1);
+}
+
+h1 {
+    font-family: "Matemasie", sans-serif;
+    text-align: center;
+    margin: 1rem;
+    color: #fdfd7c;
+    font-size: 4rem;
+}
+
+p {
+    margin: 0.3rem;
+    color: inherit;
+    font-size: inherit;
+}

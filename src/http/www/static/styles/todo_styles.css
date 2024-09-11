@@ -1,29 +1,4 @@
-body {
-    font-family: "Caveat", sans-serif;
-    min-height: 100vh;
-    margin: 0;
-    padding: 0;
-    background-color: #7c3c12;
-    background-image: linear-gradient(#7c3c12, #a45822);
-    background-size: cover;
-    background-repeat: no-repeat;
-    background-attachment: fixed;
-}
-
-main {
-    display: flex;
-    align-items: center;
-    flex-direction: column;
-    width: 60%;
-    margin: 2rem auto 6rem auto;
-    padding: 1em;
-    background-color: #DAA520;
-    text-align: center;
-    border-radius: 0.6rem;
-    box-shadow: 0 0.2rem 0.6rem rgba(0, 0, 0, 0.2);
-}
-
-img {
+#add-todo-btn img {
     height: 4rem;
     width: auto;
 }
@@ -38,20 +13,6 @@ img {
 
 #add-todo-btn:hover {
     transform: scale(1.2);
-}
-
-h1 {
-    font-family: "Matemasie", sans-serif;
-    text-align: center;
-    margin: 1rem;
-    color: #fdfd7c;
-    font-size: 4rem;
-}
-
-p {
-    margin: 0.3rem;
-    color: inherit;
-    font-size: inherit;
 }
 
 .todo-item {
@@ -181,46 +142,8 @@ button.complete-btn:hover {
     color: white;
 }
 
-.popup-form {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0, 0, 0, 0.5);
-    z-index: 1000;
-}
-
-#form-container {
-    font-family: "Roboto", sans-serif;
-    background-color: #FFFF66;
-    border-radius: 1rem;
-    padding: 2rem;
-    width: 90%;
-    max-width: 40rem;
-    box-shadow: 0 0.2rem 0.6rem rgba(0, 0, 0, 0.2);
-    text-align: center;
-}
-
-#form-container h2 {
-    color: #050000;
-    font-size: 2.5rem;
-    margin: 1rem 0;
-}
-
-#form-container label {
-    display: block;
-    margin: 0.5rem 0;
-    font-size: 1.5rem;
-    color: #000;
-    text-align: left;
-}
-
-#form-container input,
 #form-container textarea {
+    height: 10rem;
     width: calc(100% - 1rem);
     padding: 0.5rem;
     margin-bottom: 1rem;
@@ -229,76 +152,8 @@ button.complete-btn:hover {
     font-size: 1rem;
 }
 
-#form-container input:focus,
 #form-container textarea:focus {
     outline: 0.15rem solid #eea405;
-}
-
-#form-container textarea {
-    height: 10rem;
-}
-
-#submit-btn,
-#confirm-complete-btn {
-    background-color: #32CD32;
-    color: #fff;
-    padding: 0.5rem 1rem;
-    border: none;
-    border-radius: 0.4rem;
-    cursor: pointer;
-    font-size: 1.2rem;
-    transition: background-color 0.3s ease;
-}
-
-#submit-btn:hover,
-#confirm-complete-btn:hover {
-    background-color: #228B22;
-}
-
-#close-btn,
-#cancel-complete-btn {
-    background-color: #FF6347;
-    color: #fff;
-    padding: 0.5rem 1rem;
-    border: none;
-    border-radius: 0.4rem;
-    cursor: pointer;
-    font-size: 1.2rem;
-    margin-top: 0.5rem;
-    transition: background-color 0.3s ease;
-}
-
-#close-btn:hover,
-#cancel-complete-btn:hover {
-    background-color: #FF4500;
-}
-
-.success-popup {
-    position: fixed;
-    top: 2rem;
-    left: 50%;
-    transform: translateX(-50%);
-    background-color: #4CAF50;
-    color: #ffffff;
-    padding: 0.8em;
-    font-family: "Roboto", sans-serif;
-    font-size: 2rem;
-    border-radius: 0.6rem;
-    z-index: 1000;
-}
-
-.failure-popup {
-    position: fixed;
-    top: 2rem;
-    left: 50%;
-    transform: translateX(-50%);
-    background-color: #bd3535;
-    color: #ffffff;
-    padding: 0.8em;
-    font-family: "Roboto", sans-serif;
-    font-size: 2rem;
-    border-radius: 0.6rem;
-    z-index: 1000;
 }
 
 .confirmation-popup {
@@ -323,8 +178,4 @@ button.complete-btn:hover {
     max-width: 40rem;
     box-shadow: 0 0.2rem 0.6rem rgba(0, 0, 0, 0.2);
     text-align: center;
-}
-
-.hidden {
-    display: none;
 }

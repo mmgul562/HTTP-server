@@ -549,12 +549,13 @@ static void signup_user(HttpRequest *req, Task *context) {
 
     User user = {.email = email, .password = password};
 
-    if (db_signup_user(context->db_conn, &user) == 1) {
+    int signup_result = db_signup_user(context->db_conn, &user);
+    if (signup_result == 1) {
         free(email);
         free(password);
         try_sending_error(client_socket, 500);
         return;
-    } else if (db_signup_user(context->db_conn, &user) == 23505) {
+    } else if (signup_result == 23505) {
         free(email);
         free(password);
         try_sending_error(client_socket, 400);

@@ -1,37 +1,12 @@
 body {
-    background-color: #7c3c12;
-    background-image: linear-gradient(#7c3c12, #a45822);
-    background-size: cover;
-    background-repeat: no-repeat;
-    background-attachment: fixed;
     font-family: "Roboto", sans-serif;
-    margin: 0;
-    padding: 0;
-}
-
-h1 {
-    text-align: center;
-    font-size: 4rem;
-    margin: 0.5rem 0.5rem 2rem 0.5rem;
-    font-family: "Matemasie", sans-serif;
-    color: #fdfd7c;
-}
-
-main {
-    padding: 0.5em;
-    max-width: 80rem;
-    margin: 0 auto;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
 }
 
 section {
     width: 100%;
     text-align: center;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-    background-color: #FFFF66;
+    background-color: #DAA520;
     border-radius: 0.6rem;
     padding: 2em;
 }
@@ -55,7 +30,7 @@ a {
 
 #return-home-btn {
     background-color: #e3a725;
-    font-family: "Matemasie", sans-serif;
+    font-family: "Roboto", sans-serif;
     font-size: 2rem;
     padding: 0.5em 1em;
     border: none;

@@ -1,0 +1,24 @@
+h2 {
+    color: #050000;
+    font-size: 2rem;
+    margin: 1rem 0;
+}
+
+#sign-up-btn,
+#sign-in-btn {
+    background-color: #3275cd;
+    color: #fff;
+    padding: 0.5rem 1rem;
+    margin: 0.3rem 0.5rem;
+    border: none;
+    border-radius: 0.4rem;
+    cursor: pointer;
+    font-size: 1.2rem;
+    transition: all 0.2s ease;
+}
+
+#sign-up-btn:hover,
+#sign-in-btn:hover {
+    transform: scale(1.1);
+    background-color: #2564b2;
+}

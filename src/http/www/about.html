@@ -10,19 +10,21 @@
 	<link
 			href="https://fonts.googleapis.com/css2?family=Matemasie&family=Roboto:ital,wght@0,100;0,300;0,400;0,500;0,700;0,900;1,100;1,300;1,400;1,500;1,700;1,900&display=swap"
 			rel="stylesheet">
-	<link rel="stylesheet" href="/other_styles.css">
+	<link rel="stylesheet" href="/styles/base.css">
 </head>
 <body>
-<h1>Simple TODO web application made in C</h1>
+<h1>About The App</h1>
+<header id="main-header">
+	<a href="/"><img src="/images/home.png" alt="home"></a>
+	<a href="/user"><img src="/images/user.png" alt="user"></a>
+	<a href="/about"><img src="/images/about.png" alt="about"></a>
+</header>
 <main>
 	<section>
 		<h2>A simple TODO app, served by HTTP server written in C.</h2>
-		<img src="/c.png" alt="C">
+		<img src="/images/c.png" alt="C">
 		<p>Authenticated users are able to perform CRUD operations on their To-Dos.</p>
 	</section>
-	<a href="/">
-		<button id="return-home-btn">HOME</button>
-	</a>
 </main>
 </body>
 </html>

@@ -93,6 +93,7 @@ static bool delete_user_sessions(PGconn *conn, int user_id) {
     return true;
 }
 
+
 bool db_login_user(PGconn *conn, User *user, char *session_token) {
     PGresult *res = PQexec(conn, "BEGIN");
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {

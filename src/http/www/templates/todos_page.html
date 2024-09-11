@@ -8,13 +8,20 @@
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400..700&family=Matemasie&display=swap"
 				rel="stylesheet">
-	<link rel="stylesheet" href="/todo_styles.css">
+	<link rel="stylesheet" href="/styles/todo_styles.css">
+	<link rel="stylesheet" href="/styles/base.css">
+	<link rel="stylesheet" href="/styles/form-base.css">
 	<title>To-Do List</title>
 </head>
 <body>
-<h1>Your TO-DO List</h1>
+<h1>Your To-Do List</h1>
+<header id="main-header">
+	<a href="/"><img src="/images/home.png" alt="home"></a>
+	<a href="/user"><img src="/images/user.png" alt="user"></a>
+	<a href="/about"><img src="/images/about.png" alt="about"></a>
+</header>
 <main>
-	<button id="add-todo-btn"><img src="/add-btn.png" alt="add-btn"></button>
+	<button id="add-todo-btn"><img src="/images/add-btn.png" alt="add-btn"></button>
 	<!-- TODO_ITEMS -->
 </main>
 
@@ -40,14 +47,15 @@
 	<div id="confirmation-container">
 		<p>Are you sure you want to mark this To-Do as completed? (It will be deleted afterward)</p>
 		<div id="confirmation-buttons">
-			<button id="confirm-complete-btn">Complete</button>
-			<button id="cancel-complete-btn">Cancel</button>
+			<button id="confirm-btn">Complete</button>
+			<button id="cancel-btn">Cancel</button>
 		</div>
 	</div>
 </div>
 <div id="success-popup" class="success-popup hidden"></div>
 <div id="failure-popup" class="failure-popup hidden"></div>
 
-<script src="/todo_script.js"></script>
+<script src="/scripts/base.js"></script>
+<script src="/scripts/todo_script.js"></script>
 </body>
 </html>
