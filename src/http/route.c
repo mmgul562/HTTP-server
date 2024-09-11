@@ -21,7 +21,7 @@ static void get_home(HttpRequest *req, Task *context);
 
 static void get_about(HttpRequest *req, Task *context);
 
-static void get_todo_page(HttpRequest *req, Task *context);
+static void get_todo_page(HttpRequest *req, Task *context, int user_id);
 
 static void create_todo(HttpRequest *req, Task *context);
 
@@ -37,9 +37,13 @@ static void login_user(HttpRequest *req, Task *context);
 
 static void logout_user(HttpRequest *req, Task *context);
 
+static void update_user(HttpRequest *req, Task *context);
+
+static void delete_user(HttpRequest *req, Task *context);
+
 static const Route ROUTES[] = {
         {"/",            GET,    get_home},
-        {"/todo",        GET,    get_todo_page},
+        {"/about",       GET,    get_about},
         {"/todo",        POST,   create_todo},
         {"/todo/",       PATCH,  update_todo},
         {"/todo/",       DELETE, delete_todo},
@@ -47,7 +51,8 @@ static const Route ROUTES[] = {
         {"/user/signup", POST,   signup_user},
         {"/user/login",  POST,   login_user},
         {"/user/logout", POST,   logout_user},
-        {"/about",       GET,    get_about},
+        {"/user",        PATCH,  update_user},
+        {"/user",        DELETE, delete_user}
 };
 
 static const int ROUTES_COUNT = sizeof(ROUTES) / sizeof(Route);
@@ -209,29 +214,33 @@ static bool is_valid_password(const char *password) {
 
 // HANDLERS
 
+static void get_authentication_page(HttpRequest *req, Task *context) {
+    int client_socket = context->client_socket;
+    const char *authentication_path = DOCUMENT_ROOT"/authentication.html";
+    try_sending_file(client_socket, authentication_path);
+}
+
+
 static void get_home(HttpRequest *req, Task *context) {
-    if (check_session(req, context) < 0) {
-        get_user_page(req, context);
+    int user_id = check_session(req, context);
+    if (user_id < 0) {
+        const char *location = "Location: /user\r\n";
+        send_headers(context->client_socket, 303, NULL, location);
     } else {
-        get_todo_page(req, context);
+        get_todo_page(req, context, user_id);
     }
 }
 
 
 static void get_about(HttpRequest *req, Task *context) {
-    const char *about_path = DOCUMENT_ROOT
-    "/about.html";
-    try_sending_file(context->client_socket, about_path);
+    int client_socket = context->client_socket;
+    const char *about_path = DOCUMENT_ROOT"/about.html";
+    try_sending_file(client_socket, about_path);
 }
 
 
-static void get_todo_page(HttpRequest *req, Task *context) {
+static void get_todo_page(HttpRequest *req, Task *context, int user_id) {
     int client_socket = context->client_socket;
-    int user_id = check_session(req, context);
-    if (user_id < 0) {
-        try_sending_error(client_socket, 401);
-        return;
-    }
     int page = 1;
 
     if (req->query_string) {
@@ -260,11 +269,10 @@ static void get_todo_page(HttpRequest *req, Task *context) {
     }
 
     char *remainder;
-    const char *template_path = DOCUMENT_ROOT
-    "/templates/todos.html";
+    const char *template_path = DOCUMENT_ROOT"/templates/todos_page.html";
     char *template = read_template(template_path, "<!-- TODO_ITEMS -->", &remainder);
     if (!template) {
-        try_sending_error(context->client_socket, 500);
+        try_sending_error(client_socket, 500);
         free_todos(todos, count);
         return;
     }
@@ -316,12 +324,12 @@ static void get_todo_page(HttpRequest *req, Task *context) {
     }
     sprintf(p, "</div>");
 
-    send_headers(context->client_socket, 200, "text/html", NULL);
-    send(context->client_socket, template, strlen(template), 0);
+    send_headers(client_socket, 200, "text/html", NULL);
+    send(client_socket, template, strlen(template), 0);
     if (count != 0) {
-        send(context->client_socket, todos_html, strlen(todos_html), 0);
+        send(client_socket, todos_html, strlen(todos_html), 0);
     }
-    send(context->client_socket, remainder, strlen(remainder), 0);
+    send(client_socket, remainder, strlen(remainder), 0);
 
     free(template);
     free(todos_html);
@@ -375,7 +383,8 @@ static void create_todo(HttpRequest *req, Task *context) {
         return;
     }
 
-    send_headers(client_socket, 201, NULL, NULL);
+    const char *location = "Location: /\r\n";
+    send_headers(client_socket, 201, NULL, location);
     free(summary);
     free(task);
     if (due_time) free(due_time);
@@ -398,7 +407,7 @@ static void update_todo(HttpRequest *req, Task *context) {
     }
 
     if (strlen(req->path) == 6) {                           // no id after /todo/
-        try_sending_error(client_socket, 500);
+        try_sending_error(client_socket, 400);
         return;
     }
 
@@ -439,7 +448,7 @@ static void update_todo(HttpRequest *req, Task *context) {
         return;
     }
 
-    send_headers(client_socket, 200, NULL, NULL);
+    send_headers(client_socket, 204, NULL, NULL);
     free(summary);
     free(task);
     if (due_time) free(due_time);
@@ -469,14 +478,43 @@ static void delete_todo(HttpRequest *req, Task *context) {
         try_sending_error(client_socket, 404);
         return;
     }
-    send_headers(client_socket, 200, NULL, NULL);
+    send_headers(client_socket, 204, NULL, NULL);
 }
 
 
 static void get_user_page(HttpRequest *req, Task *context) {
-    const char *user_page_path = DOCUMENT_ROOT
-    "/user_page.html";
-    try_sending_file(context->client_socket, user_page_path);
+    int user_id = check_session(req, context);
+    if (user_id < 0) {
+        get_authentication_page(req, context);
+        return;
+    }
+
+    int client_socket = context->client_socket;
+    char *email = db_get_user_email(context->db_conn, user_id);
+    if (!email) {
+        try_sending_error(client_socket, 500);
+        return;
+    }
+
+    char *remainder;
+    const char *template_path = DOCUMENT_ROOT"/templates/user_page.html";
+    char *template = read_template(template_path, "<!-- USER_EMAIL -->", &remainder);
+    if (!template) {
+        try_sending_error(client_socket, 500);
+        return;
+    }
+
+    char *user_html = malloc(MAX_TEMPLATE_SIZE + 128);
+    sprintf(user_html, "%s", email);
+
+    send_headers(client_socket, 200, "text/html", NULL);
+    send(client_socket, template, strlen(template), 0);
+    send(client_socket, user_html, strlen(user_html), 0);
+    send(client_socket, remainder, strlen(remainder), 0);
+
+    free(template);
+    free(user_html);
+    free(email);
 }
 
 
@@ -511,14 +549,20 @@ static void signup_user(HttpRequest *req, Task *context) {
 
     User user = {.email = email, .password = password};
 
-    if (!db_signup_user(context->db_conn, &user)) {
+    if (db_signup_user(context->db_conn, &user) == 1) {
         free(email);
         free(password);
         try_sending_error(client_socket, 500);
         return;
+    } else if (db_signup_user(context->db_conn, &user) == 23505) {
+        free(email);
+        free(password);
+        try_sending_error(client_socket, 400);
+        return;
     }
 
-    send_headers(client_socket, 201, NULL, NULL);
+    const char *location = "Location: /user\r\n";
+    send_headers(client_socket, 201, NULL, location);
     free(email);
     free(password);
 }
@@ -560,7 +604,12 @@ static void login_user(HttpRequest *req, Task *context) {
         char cookie[MAX_COOKIE_SIZE];
         snprintf(cookie, sizeof(cookie), "Set-Cookie: session=%s; Path=/; HttpOnly; SameSite=Strict\r\n",
                  session_token);
-        send_headers(client_socket, 200, NULL, cookie);
+        const char *location = "Location: /\r\n";
+        char header[strlen(cookie) + strlen(location) + 1];
+        header[0] = '\0';
+        strcat(header, location);
+        strcat(header, cookie);
+        send_headers(client_socket, 303, NULL, header);
     } else {
         try_sending_error(client_socket, 500);
     }
@@ -586,10 +635,88 @@ static void logout_user(HttpRequest *req, Task *context) {
 
     if (db_delete_session(context->db_conn, session_token)) {
         const char *cookie = "Set-Cookie: session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT\r\n";
-        send_headers(client_socket, 200, NULL, cookie);
+        send_headers(client_socket, 204, NULL, cookie);
     } else {
         try_sending_error(client_socket, 500);
     }
+}
+
+
+void update_user(HttpRequest *req, Task *context) {
+    int client_socket = context->client_socket;
+    int user_id = check_session(req, context);
+    if (user_id < 0) {
+        try_sending_error(client_socket, 401);
+        return;
+    }
+    const char *headers = req->headers;
+    const char *body = req->body;
+
+    if (strstr(headers, "Content-Type: application/x-www-form-urlencoded") == NULL) {
+        try_sending_error(client_socket, 415);
+        return;
+    }
+
+    const char *expected_keys[] = {"email", "password"};
+    bool found_keys[2];
+    memset(found_keys, 0, sizeof(found_keys));
+
+    // email and password can't be changed in a single request
+    if (!parse_url_data(body, expected_keys, 2, found_keys) || (found_keys[0] && found_keys[1])) {
+        try_sending_error(client_socket, 400);
+        return;
+    }
+
+    char *email = NULL;
+    char *password = NULL;
+    if (found_keys[0]) {
+        email = extract_url_param(body, "email");
+        if (!is_valid_email(email)) {
+            free(email);
+            try_sending_error(client_socket, 400);
+            return;
+        }
+        if (db_update_user_email(context->db_conn, user_id, email) == 1) {
+            free(email);
+            try_sending_error(client_socket, 500);
+            return;
+        } else if (db_update_user_email(context->db_conn, user_id, email) == 23505) {
+            free(email);
+            try_sending_error(client_socket, 400);
+            return;
+        }
+    } else if (found_keys[1]) {
+        password = extract_url_param(body, "password");
+        if (!is_valid_password(password)) {
+            free(password);
+            try_sending_error(client_socket, 400);
+            return;
+        }
+        if (!db_update_user_password(context->db_conn, user_id, password)) {
+            free(password);
+            try_sending_error(client_socket, 500);
+            return;
+        }
+    }
+    send_headers(client_socket, 204, NULL, NULL);
+    if (password) free(password);
+    if (email) free(email);
+}
+
+
+void delete_user(HttpRequest *req, Task *context) {
+    int client_socket = context->client_socket;
+    int user_id = check_session(req, context);
+    if (user_id < 0) {
+        try_sending_error(client_socket, 401);
+        return;
+    }
+
+    if (!db_delete_user(context->db_conn, user_id)) {
+        try_sending_error(client_socket, 500);
+        return;
+    }
+    send_headers(client_socket, 204, NULL, NULL);
 }
 
 

@@ -137,7 +137,7 @@ document.addEventListener('DOMContentLoaded', () => {
             handleResponse(
                 response,
                 isEditMode ? 'To-Do updated successfully!' : 'To-Do added successfully!',
-                isEditMode ? 'Failed to update a To-Do' : 'Failed to add a To-Do'
+                isEditMode ? 'Failed to update the To-Do' : 'Failed to add a To-Do'
             );
         })
         .catch(handleError);

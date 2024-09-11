@@ -31,55 +31,20 @@ h1 {
     font-size: 4rem;
 }
 
+h2 {
+    color: #050000;
+    font-size: 2rem;
+    margin: 1rem 0;
+}
+
 p {
     margin: 0.3rem;
     color: inherit;
     font-size: inherit;
 }
 
-span {
-    padding: 0.2em 0.3em;
-    border: 0.1rem solid #504f4f;
-    border-radius: 0.8rem;
-    background-color: #c4b3ab;
-    font-weight: normal;
-}
-
-.credentials-container {
-    margin: 1rem 1.5rem;
-    padding: 0.5em;
-}
-
-.email-container,
-.password-container {
-    margin: 0.7rem;
-    padding: 0.5em 0.3em 0.2em 0.3em;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    font-size: 2rem;
-}
-
-.buttons-container {
-    margin-top: 2rem;
-}
-
-#change-email-btn,
-#change-password-btn {
-    background-color: transparent;
-    border: none;
-    cursor: pointer;
-    font-size: 2rem;
-    outline: none;
-    transition-duration: 0.2s;
-}
-
-#change-email-btn:hover,
-#change-password-btn:hover {
-    transform: scale(1.2);
-}
-
-#sign-out-btn {
+#sign-up-btn,
+#sign-in-btn {
     background-color: #3275cd;
     color: #fff;
     padding: 0.5rem 1rem;
@@ -91,26 +56,10 @@ span {
     transition: all 0.2s ease;
 }
 
-#sign-out-btn:hover {
+#sign-up-btn:hover,
+#sign-in-btn:hover {
     transform: scale(1.1);
     background-color: #2564b2;
-}
-
-#delete-account-btn {
-    background-color: #dc4c33;
-    color: #fff;
-    padding: 0.5rem 1rem;
-    margin: 0.3rem 0.5rem;
-    border: 0.15rem solid red;
-    border-radius: 0.4rem;
-    cursor: pointer;
-    font-size: 1.2rem;
-    transition: all 0.2s ease;
-}
-
-#delete-account-btn:hover {
-    transform: scale(1.1);
-    background-color: #e33b00;
 }
 
 .popup-form {
@@ -164,8 +113,7 @@ span {
     outline: 0.15rem solid #eea405;
 }
 
-#submit-btn,
-#confirm-delete-btn {
+#submit-btn {
     background-color: #32CD32;
     color: #fff;
     padding: 0.5rem 1rem;
@@ -176,13 +124,11 @@ span {
     transition: background-color 0.3s ease;
 }
 
-#submit-btn:hover,
-#confirm-delete-btn:hover {
+#submit-btn:hover {
     background-color: #228B22;
 }
 
-#close-btn,
-#cancel-delete-btn {
+#close-btn {
     background-color: #FF6347;
     color: #fff;
     padding: 0.5rem 1rem;
@@ -194,8 +140,7 @@ span {
     transition: background-color 0.3s ease;
 }
 
-#close-btn:hover,
-#cancel-delete-btn:hover {
+#close-btn:hover {
     background-color: #FF4500;
 }
 
@@ -225,31 +170,6 @@ span {
     font-size: 2rem;
     border-radius: 0.6rem;
     z-index: 1000;
-}
-
-.confirmation-popup {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0, 0, 0, 0.5);
-    z-index: 1000;
-}
-
-#confirmation-container {
-    font-family: "Roboto", sans-serif;
-    font-size: 1.5rem;
-    background-color: #FFFF66;
-    border-radius: 1rem;
-    padding: 1.5em;
-    max-width: 50rem;
-    box-shadow: 0 0.2rem 0.6rem rgba(0, 0, 0, 0.2);
-    text-align: center;
 }
 
 .hidden {

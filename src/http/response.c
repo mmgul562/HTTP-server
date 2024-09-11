@@ -39,14 +39,17 @@ void send_headers(int client_socket, int status_code, const char *content_type, 
         case 201:
             status_text = "Created";
             break;
+        case 204:
+            status_text = "No Content";
+            break;
+        case 303:
+            status_text = "See Other";
+            break;
         case 400:
             status_text = "Bad Request";
             break;
         case 401:
             status_text = "Unauthorized";
-            break;
-        case 403:
-            status_text = "Forbidden";
             break;
         case 404:
             status_text = "Not Found";

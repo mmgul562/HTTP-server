@@ -54,7 +54,6 @@ bool db_create_session(PGconn *conn, int user_id, char *token) {
         PQclear(res);
         return false;
     }
-
     PQclear(res);
     strcpy(token, session_token);
     return true;
@@ -79,7 +78,6 @@ int db_validate_session(PGconn *conn, const char *token) {
         PQclear(res);
         return -1;
     }
-
     int user_id = atoi(PQgetvalue(res, 0, 0));
     PQclear(res);
     return user_id;
@@ -98,7 +96,6 @@ bool db_delete_session(PGconn *conn, const char *token) {
         PQclear(res);
         return false;
     }
-
     PQclear(res);
     return true;
 }
