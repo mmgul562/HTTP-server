@@ -1,6 +1,7 @@
 #ifndef HTTP_SERVER_TODOS_H
 #define HTTP_SERVER_TODOS_H
 
+#include "util/query_result.h"
 #include <libpq-fe.h>
 
 
@@ -19,9 +20,9 @@ Todo *db_get_all_todos(PGconn *conn, int user_id, int *count, int page, int page
 
 bool db_create_todo(PGconn *conn, Todo *todo);
 
-bool db_update_todo(PGconn *conn, Todo *todo);
+QueryResult db_update_todo(PGconn *conn, Todo *todo);
 
-bool db_delete_todo(PGconn *conn, int id);
+QueryResult db_delete_todo(PGconn *conn, int id, int user_id);
 
 void free_todos(Todo *todos, int count);
 

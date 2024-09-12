@@ -33,13 +33,13 @@ char *db_get_user_email(PGconn *conn, int id) {
 }
 
 
-int db_signup_user(PGconn *conn, User *user) {
+QueryResult db_signup_user(PGconn *conn, User *user) {
     uint8_t salt[SALT_LEN];
     char encoded[ENCODED_LEN];
 
     if (RAND_bytes(salt, SALT_LEN) != 1) {
         fprintf(stderr, "Error generating random salt\n");
-        return 1;
+        return QRESULT_INTERNAL_ERROR;
     }
     uint32_t t_cost = 2;
     uint32_t m_cost = (1 << 16);
@@ -52,7 +52,7 @@ int db_signup_user(PGconn *conn, User *user) {
 
     if (result != ARGON2_OK) {
         fprintf(stderr, "Error hashing password: %s\n", argon2_error_message(result));
-        return 1;
+        return QRESULT_INTERNAL_ERROR;
     }
 
     const char *query = "INSERT INTO users (email, hashed_password) VALUES ($1, $2)";
@@ -65,15 +65,14 @@ int db_signup_user(PGconn *conn, User *user) {
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
         if (strcmp(PQresultErrorField(res, PG_DIAG_SQLSTATE), "23505") == 0) {
             PQclear(res);
-            return 23505;
+            return QRESULT_UNIQUE_CONSTRAINT_ERROR;
         }
         fprintf(stderr, "User registration failed: %s", PQerrorMessage(conn));
         PQclear(res);
-        return 1;
+        return QRESULT_INTERNAL_ERROR;
     }
-
     PQclear(res);
-    return 0;
+    return QRESULT_OK;
 }
 
 
@@ -94,12 +93,12 @@ static bool delete_user_sessions(PGconn *conn, int user_id) {
 }
 
 
-bool db_login_user(PGconn *conn, User *user, char *session_token) {
+QueryResult db_login_user(PGconn *conn, User *user, char *session_token) {
     PGresult *res = PQexec(conn, "BEGIN");
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
         fprintf(stderr, "Failed to begin transaction: %s", PQerrorMessage(conn));
         PQclear(res);
-        return false;
+        return QRESULT_INTERNAL_ERROR;
     }
     PQclear(res);
 
@@ -114,13 +113,13 @@ bool db_login_user(PGconn *conn, User *user, char *session_token) {
         fprintf(stderr, "User login failed: %s", PQerrorMessage(conn));
         PQclear(res);
         PQexec(conn, "ROLLBACK");
-        return false;
+        return QRESULT_INTERNAL_ERROR;
     }
 
     if (PQntuples(res) == 0) {
         PQclear(res);
         PQexec(conn, "ROLLBACK");
-        return false;
+        return QRESULT_NONE_AFFECTED;
     }
 
     int user_id = atoi(PQgetvalue(res, 0, 0));
@@ -132,28 +131,28 @@ bool db_login_user(PGconn *conn, User *user, char *session_token) {
     if (verify_result == ARGON2_OK) {
         if (!delete_user_sessions(conn, user_id)) {
             PQexec(conn, "ROLLBACK");
-            return false;
+            return QRESULT_INTERNAL_ERROR;
         } else if (!db_create_session(conn, user_id, session_token)) {
             fprintf(stderr, "Failed to create session\n");
             PQexec(conn, "ROLLBACK");
-            return false;
+            return QRESULT_INTERNAL_ERROR;
         }
     } else {
         PQexec(conn, "ROLLBACK");
-        return false;
+        return QRESULT_USER_ERROR;
     }
     res = PQexec(conn, "COMMIT");
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
         fprintf(stderr, "Failed to commit transaction: %s", PQerrorMessage(conn));
         PQclear(res);
-        return false;
+        return QRESULT_INTERNAL_ERROR;
     }
     PQclear(res);
-    return true;
+    return QRESULT_OK;
 }
 
 
-int db_update_user_email(PGconn *conn, int id, const char *email) {
+QueryResult db_update_user_email(PGconn *conn, int id, const char *email) {
     char id_str[10];
     snprintf(id_str, sizeof(id_str), "%d", id);
     const char *params[2] = {email, id_str};
@@ -164,19 +163,16 @@ int db_update_user_email(PGconn *conn, int id, const char *email) {
     PGresult *res = PQexecParams(conn, query, 2, NULL, params, param_lengths, param_formats, 0);
 
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-        // unique constraint violation
         if (strcmp(PQresultErrorField(res, PG_DIAG_SQLSTATE), "23505") == 0) {
             PQclear(res);
-            return 23505;
+            return QRESULT_UNIQUE_CONSTRAINT_ERROR;
         }
         fprintf(stderr, "User email updating failed: %s", PQerrorMessage(conn));
         PQclear(res);
-        return 1;
+        return QRESULT_INTERNAL_ERROR;
     }
-
-    int affected_rows = atoi(PQcmdTuples(res));
     PQclear(res);
-    return affected_rows > 0 ? 0 : 1;
+    return QRESULT_OK;
 }
 
 
@@ -216,9 +212,8 @@ bool db_update_user_password(PGconn *conn, int id, const char *password) {
         fprintf(stderr, "User password updating failed: %s", PQerrorMessage(conn));
         return false;
     }
-    int affected_rows = atoi(PQcmdTuples(res));
     PQclear(res);
-    return affected_rows > 0;
+    return true;
 }
 
 
@@ -233,7 +228,6 @@ bool db_delete_user(PGconn *conn, int id) {
         PQclear(res);
         return false;
     }
-    int affected_rows = atoi(PQcmdTuples(res));
     PQclear(res);
-    return affected_rows > 0;
+    return true;
 }

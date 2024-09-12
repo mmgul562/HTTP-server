@@ -1,6 +1,7 @@
 #ifndef HTTP_SERVER_USERS_H
 #define HTTP_SERVER_USERS_H
 
+#include "util/query_result.h"
 #include <libpq-fe.h>
 
 
@@ -12,11 +13,11 @@ typedef struct {
 
 char *db_get_user_email(PGconn *conn, int id);
 
-int db_signup_user(PGconn *conn, User *user);
+QueryResult db_signup_user(PGconn *conn, User *user);
 
-bool db_login_user(PGconn *conn, User *user, char *session_token);
+QueryResult db_login_user(PGconn *conn, User *user, char *session_token);
 
-int db_update_user_email(PGconn *conn, int id, const char *email);
+QueryResult db_update_user_email(PGconn *conn, int id, const char *email);
 
 bool db_update_user_password(PGconn *conn, int id, const char *password);
 

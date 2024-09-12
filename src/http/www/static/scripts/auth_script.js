@@ -15,7 +15,6 @@ document.addEventListener('DOMContentLoaded', () => {
             handleResponse(
                 response,
                 isSignIn ? 'Successfully signed in!' : 'Successfully signed up!',
-                isSignIn ? 'Failed to sign in' : 'Failed to sign up',
                 isSignIn
             );
         })

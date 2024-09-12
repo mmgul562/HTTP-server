@@ -6,7 +6,8 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
-#define MAX_PATH_LENGTH 304
+#define MAX_PATH_LENGTH 256
+#define MAX_ERROR_JSON_LENGTH 512
 #define DOCUMENT_ROOT "../src/http/www"
 
 
@@ -57,6 +58,9 @@ void send_headers(int client_socket, int status_code, const char *content_type, 
         case 405:
             status_text = "Method Not Allowed";
             break;
+        case 409:
+            status_text = "Conflict";
+            break;
         case 415:
             status_text = "Unsupported Media Type";
             break;
@@ -84,7 +88,18 @@ static void send_file(int client_socket, int fd) {
 }
 
 
-void try_sending_error(int client_socket, int status_code) {
+void send_error_message(int client_socket, int status_code, const char *message) {
+    char err_message[MAX_ERROR_JSON_LENGTH];
+    sprintf(err_message, "{\"error\": {\"message\": \"%s\"}}", message);
+    char content_length[64];
+    sprintf(content_length, "Content-Length: %ld\r\n", strlen(err_message));
+
+    send_headers(client_socket, status_code, "application/json", content_length);
+    send(client_socket, err_message, sizeof(err_message), 0);
+}
+
+
+void try_sending_error_file(int client_socket, int status_code) {
     char err_path[MAX_PATH_LENGTH];
     snprintf(err_path, sizeof(err_path), DOCUMENT_ROOT"/errors/%d.html", status_code);
 
@@ -97,11 +112,22 @@ void try_sending_error(int client_socket, int status_code) {
                                    "\t<p>Sorry, something went wrong on our side. Please try again later.</p>\r\n";
             send(client_socket, err_msg, sizeof(err_msg), 0);
         } else {
-            try_sending_error(client_socket, 500);
+            try_sending_error_file(client_socket, 500);
         }
         return;
     }
-    send_headers(client_socket, status_code, "text/html", NULL);
+    struct stat file_stat;
+    if (stat(err_path, &file_stat) != 0) {
+        perror("Error getting file stats");
+        try_sending_error_file(client_socket, 500);
+        return;
+    }
+
+    off_t file_size = file_stat.st_size;
+    char content_length[64];
+    snprintf(content_length, sizeof(content_length), "Content-Length: %ld\r\n", file_size);
+
+    send_headers(client_socket, status_code, "text/html", content_length);
     send_file(client_socket, fd);
     close(fd);
 }
@@ -111,13 +137,13 @@ void try_sending_file(int client_socket, const char *file_path) {
     int fd = open(file_path, O_RDONLY);
     if (fd == -1) {
         perror("Error opening file");
-        try_sending_error(client_socket, 500);
+        try_sending_error_file(client_socket, 500);
         return;
     }
     struct stat file_stat;
     if (stat(file_path, &file_stat) != 0) {
         perror("Error getting file stats");
-        try_sending_error(client_socket, 500);
+        try_sending_error_file(client_socket, 500);
         return;
     }
 
@@ -134,8 +160,8 @@ void try_sending_file(int client_socket, const char *file_path) {
 
 void handle_invalid_http_request(RequestParsingStatus status, int client_socket) {
     if (status == REQ_PARSE_INVALID_FORMAT) {
-        try_sending_error(client_socket, 400);
+        send_error_message(client_socket, 400, "Invalid HTTP request");
     } else {
-        try_sending_error(client_socket, 500);
+        try_sending_error_file(client_socket, 500);
     }
 }

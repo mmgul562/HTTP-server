@@ -15,39 +15,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: {'Content-Type': 'application/x-www-form-urlencoded'},
                 body: formData.toString(),
             })
-            .then(response => {
-                hidePopup('popup-form');
-                handleResponse(response,
-                    isEmail ? `E-Mail updated successfully!` : `Password updated successfully!`,
-                    isEmail ? `Failed to update the E-Mail` : `Failed to update the password`
-                );
-            })
-            .catch(handleError);
+                .then(response => {
+                    if (response.ok) hidePopup('popup-form');
+                    handleResponse(
+                        response,
+                        isEmail ? `E-Mail updated successfully!` : `Password updated successfully!`
+                    );
+                })
+                .catch(handleError);
         });
-
-        if (isEmail) {
-            document.querySelector('.email-form-container').classList.remove('hidden');
-            document.querySelector('.password-form-container').classList.add('hidden');
-            document.getElementById('password').required = false;
-        } else {
-            document.querySelector('.password-form-container').classList.remove('hidden');
-            document.querySelector('.email-form-container').classList.add('hidden');
-            document.getElementById('email').required = false;
-        }
     };
 
     setupUserUpdateForm('change-email-btn', 'Change E-Mail', true);
+    document.getElementById('change-email-btn').addEventListener('click', () => {
+        document.querySelector('.email-form-container').classList.remove('hidden');
+        document.querySelector('.password-form-container').classList.add('hidden');
+        document.getElementById('password').required = false;
+    });
     setupUserUpdateForm('change-password-btn', 'Change Password', false);
+    document.getElementById('change-password-btn').addEventListener('click', () => {
+        document.querySelector('.password-form-container').classList.remove('hidden');
+        document.querySelector('.email-form-container').classList.add('hidden');
+        document.getElementById('email').required = false;
+    })
 
     document.getElementById('sign-out-btn').addEventListener('click', () => {
         fetch('/user/logout', {
             method: 'POST',
             headers: {'Cookie': document.cookie},
         })
-        .then(response => handleResponse(response,
-            'Successfully signed out!',
-            'Failed to sign out'))
-        .catch(handleError);
+            .then(response => handleResponse(response, 'Successfully signed out!'))
+            .catch(handleError);
     });
 
     document.getElementById('delete-account-btn').addEventListener('click', () => {
@@ -58,13 +56,11 @@ document.addEventListener('DOMContentLoaded', () => {
         fetch('/user', {
             method: 'DELETE'
         })
-        .then(response => {
-            hidePopup('confirmation-popup');
-            handleResponse(response,
-                'Account deleted successfully!',
-                'Failed to delete the account');
-        })
-        .catch(handleError);
+            .then(response => {
+                if (response.ok) hidePopup('confirmation-popup');
+                handleResponse(response, 'Account deleted successfully!');
+            })
+            .catch(handleError);
     });
 
     document.getElementById('cancel-btn').addEventListener('click', () => {

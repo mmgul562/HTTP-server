@@ -187,14 +187,16 @@ static bool is_valid_email(const char *email) {
 }
 
 
-static bool is_valid_password(const char *password) {
+static const char *is_invalid_password(const char *password) {
     size_t length = strlen(password);
     bool hasChar = false;
     bool hasDigit = false;
     bool hasSpecial = false;
 
-    if (length < 8 || length > 128) {
-        return false;
+    if (length < 8) {
+        return "Password must be at least 8 characters long.";
+    } else if (length > 128) {
+        return "Password cannot be longer than 128 characters.";
     }
 
     for (int i = 0; i < length; i++) {
@@ -206,10 +208,12 @@ static bool is_valid_password(const char *password) {
             hasSpecial = true;
         }
     }
-    if (hasChar && (hasDigit || hasSpecial)) {
-        return true;
+    if (!hasChar) {
+        return "Password must have at least 1 letter.";
+    } else if (!(hasDigit || hasSpecial)) {
+        return "Password must have at least 1 number/special character.";
     }
-    return false;
+    return NULL;
 }
 
 // HANDLERS
@@ -247,7 +251,7 @@ static void get_todo_page(HttpRequest *req, Task *context, int user_id) {
         const char *expected_keys[] = {"page"};
         bool found_keys[1] = {0};
         if (!parse_url_data(req->query_string, expected_keys, 1, found_keys)) {
-            try_sending_error(client_socket, 400);
+            try_sending_error_file(client_socket, 400);
             return;
         }
         page = atoi(extract_url_param(req->query_string, "page"));
@@ -258,7 +262,7 @@ static void get_todo_page(HttpRequest *req, Task *context, int user_id) {
     Todo *todos = db_get_all_todos(context->db_conn, user_id, &count, page, PAGE_SIZE);
 
     if (!todos) {
-        try_sending_error(client_socket, 500);
+        try_sending_error_file(client_socket, 500);
         return;
     }
 
@@ -272,7 +276,7 @@ static void get_todo_page(HttpRequest *req, Task *context, int user_id) {
     const char *template_path = DOCUMENT_ROOT"/templates/todos_page.html";
     char *template = read_template(template_path, "<!-- TODO_ITEMS -->", &remainder);
     if (!template) {
-        try_sending_error(client_socket, 500);
+        try_sending_error_file(client_socket, 500);
         free_todos(todos, count);
         return;
     }
@@ -341,14 +345,14 @@ static void create_todo(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
     int user_id = check_session(req, context);
     if (user_id < 0) {
-        try_sending_error(client_socket, 401);
+        send_error_message(client_socket, 401, "Authentication required.");
         return;
     }
     const char *headers = req->headers;
     const char *body = req->body;
 
-    if (strstr(headers, "Content-Type: application/x-www-form-urlencoded") == NULL) {
-        try_sending_error(client_socket, 415);
+    if (strstr(headers, "\r\nContent-Type: application/x-www-form-urlencoded\r\n") == NULL) {
+        send_error_message(client_socket, 415, "Content-Type should be set to application/x-www-form-urlencoded.");
         return;
     }
 
@@ -356,8 +360,14 @@ static void create_todo(HttpRequest *req, Task *context) {
     bool found_keys[3];
     memset(found_keys, 0, sizeof(found_keys));
 
-    if (!parse_url_data(body, expected_keys, 3, found_keys) || !found_keys[0] || !found_keys[1]) {
-        try_sending_error(client_socket, 400);
+    if (!parse_url_data(body, expected_keys, 3, found_keys)) {
+        send_error_message(client_socket, 400, "Unexpected key. Only 'summary', 'task' and 'duetime' accepted.");
+        return;
+    } else if (!found_keys[0]) {
+        send_error_message(client_socket, 400, "Summary must be provided.");
+        return;
+    } else if (!found_keys[1]) {
+        send_error_message(client_socket, 400, "Task must be provided.");
         return;
     }
 
@@ -365,26 +375,25 @@ static void create_todo(HttpRequest *req, Task *context) {
     char *task = extract_url_param(body, "task");
     char *due_time = extract_url_param(body, "duetime");
 
-    if (strlen(summary) > 128 || strlen(task) > 2048) {
+    bool summary_too_long = strlen(summary) > 128;
+    if (summary_too_long || strlen(task) > 2048) {
+        const char *msg = summary_too_long ? "'summary' value cannot be longer than 128 characters"
+                                           : "'task' value cannot be longer than 2048 characters";
+        send_error_message(client_socket, 400, msg);
         free(summary);
         free(task);
         if (due_time) free(due_time);
-        try_sending_error(client_socket, 400);
         return;
     }
 
     Todo todo = {.user_id = user_id, .summary = summary, .task = task, .due_time = due_time};
 
     if (!db_create_todo(context->db_conn, &todo)) {
-        free(summary);
-        free(task);
-        if (due_time) free(due_time);
-        try_sending_error(client_socket, 500);
-        return;
+        send_error_message(client_socket, 500, "Couldn't create to-do.");
+    } else {
+        const char *location = "Location: /\r\n";
+        send_headers(client_socket, 201, NULL, location);
     }
-
-    const char *location = "Location: /\r\n";
-    send_headers(client_socket, 201, NULL, location);
     free(summary);
     free(task);
     if (due_time) free(due_time);
@@ -395,25 +404,25 @@ static void update_todo(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
     int user_id = check_session(req, context);
     if (user_id < 0) {
-        try_sending_error(client_socket, 401);
+        send_error_message(client_socket, 401, "Authentication required.");
         return;
     }
     const char *headers = req->headers;
     const char *body = req->body;
 
     if (strstr(headers, "\r\nContent-Type: application/x-www-form-urlencoded\r\n") == NULL) {
-        try_sending_error(client_socket, 415);
+        send_error_message(client_socket, 415, "Content-Type should be set to application/x-www-form-urlencoded.");
         return;
     }
 
-    if (strlen(req->path) == 6) {                           // no id after /todo/
-        try_sending_error(client_socket, 400);
+    if (strlen(req->path) == 6) {
+        send_error_message(client_socket, 400, "Expected to-do ID in the URL.");
         return;
     }
 
     int id;
     if (!validate_url_id(req->path + 6, &id)) {
-        try_sending_error(client_socket, 400);
+        send_error_message(client_socket, 400, "Invalid to-do ID.");
         return;
     }
 
@@ -421,8 +430,14 @@ static void update_todo(HttpRequest *req, Task *context) {
     bool found_keys[3];
     memset(found_keys, 0, sizeof(found_keys));
 
-    if (!parse_url_data(body, expected_keys, 3, found_keys) || !found_keys[0] || !found_keys[1]) {
-        try_sending_error(client_socket, 400);
+    if (!parse_url_data(body, expected_keys, 3, found_keys)) {
+        send_error_message(client_socket, 400, "Unexpected key. Only 'summary', 'task' and 'duetime' accepted.");
+        return;
+    } else if (!found_keys[0]) {
+        send_error_message(client_socket, 400, "Summary must be provided.");
+        return;
+    } else if (!found_keys[1]) {
+        send_error_message(client_socket, 400, "Task must be provided.");
         return;
     }
 
@@ -430,25 +445,17 @@ static void update_todo(HttpRequest *req, Task *context) {
     char *task = extract_url_param(body, "task");
     char *due_time = extract_url_param(body, "duetime");
 
-    if (strlen(summary) > 128 || strlen(task) > 2048) {
-        free(summary);
-        free(task);
-        if (due_time) free(due_time);
-        try_sending_error(client_socket, 400);
-        return;
-    }
-
     Todo todo = {.id = id, .user_id = user_id, .summary = summary, .task = task, .due_time = due_time};
 
-    if (!db_update_todo(context->db_conn, &todo)) {
-        free(summary);
-        free(task);
-        if (due_time) free(due_time);
-        try_sending_error(client_socket, 404);
-        return;
+    QueryResult qres = db_update_todo(context->db_conn, &todo);
+    if (qres == QRESULT_INTERNAL_ERROR) {
+        send_error_message(client_socket, 500, "Couldn't update the to-do.");
+    } else if (qres == QRESULT_NONE_AFFECTED) {
+        send_error_message(client_socket, 404, "Couldn't find the requested to-do.");
+    } else {
+        send_headers(client_socket, 204, NULL, NULL);
     }
 
-    send_headers(client_socket, 204, NULL, NULL);
     free(summary);
     free(task);
     if (due_time) free(due_time);
@@ -459,26 +466,29 @@ static void delete_todo(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
     int user_id = check_session(req, context);
     if (user_id < 0) {
-        try_sending_error(client_socket, 401);
+        send_error_message(client_socket, 401, "Authentication required.");
         return;
     }
 
     if (strlen(req->path) == 6) {
-        try_sending_error(client_socket, 400);
+        send_error_message(client_socket, 400, "Expected to-do ID in the URL.");
         return;
     }
 
     int id;
     if (!validate_url_id(req->path + 6, &id)) {
-        try_sending_error(client_socket, 400);
+        send_error_message(client_socket, 400, "Invalid to-do ID.");
         return;
     }
 
-    if (!db_delete_todo(context->db_conn, id)) {
-        try_sending_error(client_socket, 404);
-        return;
+    QueryResult qres = db_delete_todo(context->db_conn, id, user_id);
+    if (qres == QRESULT_INTERNAL_ERROR) {
+        send_error_message(client_socket, 500, "Couldn't delete the to-do.");
+    } else if (qres == QRESULT_NONE_AFFECTED) {
+        send_error_message(client_socket, 404, "Couldn't find the requested to-do.");
+    } else {
+        send_headers(client_socket, 204, NULL, NULL);
     }
-    send_headers(client_socket, 204, NULL, NULL);
 }
 
 
@@ -492,7 +502,7 @@ static void get_user_page(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
     char *email = db_get_user_email(context->db_conn, user_id);
     if (!email) {
-        try_sending_error(client_socket, 500);
+        try_sending_error_file(client_socket, 500);
         return;
     }
 
@@ -500,7 +510,7 @@ static void get_user_page(HttpRequest *req, Task *context) {
     const char *template_path = DOCUMENT_ROOT"/templates/user_page.html";
     char *template = read_template(template_path, "<!-- USER_EMAIL -->", &remainder);
     if (!template) {
-        try_sending_error(client_socket, 500);
+        try_sending_error_file(client_socket, 500);
         return;
     }
 
@@ -524,7 +534,7 @@ static void signup_user(HttpRequest *req, Task *context) {
     const char *body = req->body;
 
     if (strstr(headers, "Content-Type: application/x-www-form-urlencoded") == NULL) {
-        try_sending_error(client_socket, 415);
+        send_error_message(client_socket, 415, "Content-Type should be set to application/x-www-form-urlencoded.");
         return;
     }
 
@@ -532,38 +542,40 @@ static void signup_user(HttpRequest *req, Task *context) {
     bool found_keys[2];
     memset(found_keys, 0, sizeof(found_keys));
 
-    if (!parse_url_data(body, expected_keys, 2, found_keys) || !found_keys[0] || !found_keys[1]) {
-        try_sending_error(client_socket, 400);
+    if (!parse_url_data(body, expected_keys, 2, found_keys)) {
+        send_error_message(client_socket, 400, "Unexpected key. Only 'email' and 'password' accepted.");
+        return;
+    } else if (!found_keys[0]) {
+        send_error_message(client_socket, 400, "E-Mail must be provided.");
+        return;
+    } else if (!found_keys[1]) {
+        send_error_message(client_socket, 400, "Password must be provided.");
         return;
     }
 
     char *email = extract_url_param(body, "email");
     char *password = extract_url_param(body, "password");
 
-    if (!is_valid_email(email) || !is_valid_password(password)) {
+    const char *invalid_password_msg = is_invalid_password(password);
+    if (!is_valid_email(email) || invalid_password_msg) {
+        const char *msg = invalid_password_msg ? invalid_password_msg : "Invalid e-mail.";
+        send_error_message(client_socket, 400, msg);
         free(email);
         free(password);
-        try_sending_error(client_socket, 400);
         return;
     }
 
     User user = {.email = email, .password = password};
 
-    int signup_result = db_signup_user(context->db_conn, &user);
-    if (signup_result == 1) {
-        free(email);
-        free(password);
-        try_sending_error(client_socket, 500);
-        return;
-    } else if (signup_result == 23505) {
-        free(email);
-        free(password);
-        try_sending_error(client_socket, 400);
-        return;
+    QueryResult qres = db_signup_user(context->db_conn, &user);
+    if (qres == QRESULT_INTERNAL_ERROR) {
+        send_error_message(client_socket, 500, "Couldn't sign up the user.");
+    } else if (qres == QRESULT_UNIQUE_CONSTRAINT_ERROR) {
+        send_error_message(client_socket, 409, "E-Mail already taken.");
+    } else {
+        const char *location = "Location: /user\r\n";
+        send_headers(client_socket, 201, NULL, location);
     }
-
-    const char *location = "Location: /user\r\n";
-    send_headers(client_socket, 201, NULL, location);
     free(email);
     free(password);
 }
@@ -575,7 +587,7 @@ static void login_user(HttpRequest *req, Task *context) {
     const char *body = req->body;
 
     if (strstr(headers, "Content-Type: application/x-www-form-urlencoded") == NULL) {
-        try_sending_error(client_socket, 415);
+        send_error_message(client_socket, 415, "Content-Type should be set to application/x-www-form-urlencoded.");
         return;
     }
 
@@ -583,25 +595,34 @@ static void login_user(HttpRequest *req, Task *context) {
     bool found_keys[2];
     memset(found_keys, 0, sizeof(found_keys));
 
-    if (!parse_url_data(body, expected_keys, 2, found_keys) || !found_keys[0] || !found_keys[1]) {
-        try_sending_error(client_socket, 400);
+    if (!parse_url_data(body, expected_keys, 2, found_keys)) {
+        send_error_message(client_socket, 400, "Unexpected key. Only 'email' and 'password' accepted.");
+        return;
+    } else if (!found_keys[0]) {
+        send_error_message(client_socket, 400, "E-Mail must be provided.");
+        return;
+    } else if (!found_keys[1]) {
+        send_error_message(client_socket, 400, "Password must be provided.");
         return;
     }
 
     char *email = extract_url_param(body, "email");
     char *password = extract_url_param(body, "password");
 
-    if (strlen(email) > 128 || strlen(password) > 128) {
+    bool email_invalid = strlen(email) > 128;
+    if (email_invalid || strlen(password) > 128) {
+        const char *msg = email_invalid ? "Invalid e-mail." : "Invalid password.";
+        send_error_message(client_socket, 400, msg);
         free(email);
         free(password);
-        try_sending_error(client_socket, 400);
         return;
     }
 
     User user = {.email = email, .password = password};
     char session_token[MAX_TOKEN_LENGTH];
 
-    if (db_login_user(context->db_conn, &user, session_token)) {
+    QueryResult qres = db_login_user(context->db_conn, &user, session_token);
+    if (qres == QRESULT_OK) {
         char cookie[MAX_COOKIE_SIZE];
         snprintf(cookie, sizeof(cookie), "Set-Cookie: session=%s; Path=/; HttpOnly; SameSite=Strict\r\n",
                  session_token);
@@ -610,9 +631,14 @@ static void login_user(HttpRequest *req, Task *context) {
         header[0] = '\0';
         strcat(header, location);
         strcat(header, cookie);
+
         send_headers(client_socket, 303, NULL, header);
-    } else {
-        try_sending_error(client_socket, 500);
+    } else if (qres == QRESULT_INTERNAL_ERROR){
+        send_error_message(client_socket, 500, "Couldn't sign in the user.");
+    } else if (qres == QRESULT_NONE_AFFECTED) {
+        send_error_message(client_socket, 404, "Invalid e-mail.");
+    } else if (qres == QRESULT_USER_ERROR) {
+        send_error_message(client_socket, 401, "Invalid password.");
     }
     free(email);
     free(password);
@@ -624,13 +650,13 @@ static void logout_user(HttpRequest *req, Task *context) {
     const char *cookie_header = strstr(req->headers, "\r\nCookie: ");
 
     if (!cookie_header) {
-        try_sending_error(client_socket, 401);
+        send_error_message(client_socket, 401, "Authentication required.");
         return;
     }
 
     char session_token[MAX_TOKEN_LENGTH] = {0};
     if (!extract_session_token(cookie_header, session_token, sizeof(session_token))) {
-        try_sending_error(client_socket, 401);
+        send_error_message(client_socket, 401, "Invalid session token.");
         return;
     }
 
@@ -638,7 +664,7 @@ static void logout_user(HttpRequest *req, Task *context) {
         const char *cookie = "Set-Cookie: session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT\r\n";
         send_headers(client_socket, 204, NULL, cookie);
     } else {
-        try_sending_error(client_socket, 500);
+        send_error_message(client_socket, 500, "Couldn't sign out the user.");
     }
 }
 
@@ -647,14 +673,14 @@ void update_user(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
     int user_id = check_session(req, context);
     if (user_id < 0) {
-        try_sending_error(client_socket, 401);
+        send_error_message(client_socket, 401, "Authentication required.");
         return;
     }
     const char *headers = req->headers;
     const char *body = req->body;
 
     if (strstr(headers, "Content-Type: application/x-www-form-urlencoded") == NULL) {
-        try_sending_error(client_socket, 415);
+        send_error_message(client_socket, 415, "Content-Type should be set to application/x-www-form-urlencoded.");
         return;
     }
 
@@ -663,8 +689,10 @@ void update_user(HttpRequest *req, Task *context) {
     memset(found_keys, 0, sizeof(found_keys));
 
     // email and password can't be changed in a single request
-    if (!parse_url_data(body, expected_keys, 2, found_keys) || (found_keys[0] && found_keys[1])) {
-        try_sending_error(client_socket, 400);
+    if (!parse_url_data(body, expected_keys, 2, found_keys)) {
+        send_error_message(client_socket, 400, "Unexpected key. Only 'email' or 'password' accepted.");
+    } else if (found_keys[0] && found_keys[1]) {
+        send_error_message(client_socket, 400, "'email' and 'password' cannot be updated in the same request.");
         return;
     }
 
@@ -673,35 +701,27 @@ void update_user(HttpRequest *req, Task *context) {
     if (found_keys[0]) {
         email = extract_url_param(body, "email");
         if (!is_valid_email(email)) {
-            free(email);
-            try_sending_error(client_socket, 400);
-            return;
+            send_error_message(client_socket, 400, "Invalid e-mail.");
+        } else {
+            QueryResult qres = db_update_user_email(context->db_conn, user_id, email);
+            if (qres == QRESULT_INTERNAL_ERROR) {
+                send_error_message(client_socket, 500, "Couldn't update the e-mail.");
+            } else if (qres == QRESULT_UNIQUE_CONSTRAINT_ERROR) {
+                send_error_message(client_socket, 409, "E-Mail already taken.");
+            }
         }
-        if (db_update_user_email(context->db_conn, user_id, email) == 1) {
-            free(email);
-            try_sending_error(client_socket, 500);
-            return;
-        } else if (db_update_user_email(context->db_conn, user_id, email) == 23505) {
-            free(email);
-            try_sending_error(client_socket, 400);
-            return;
-        }
+        free(email);
     } else if (found_keys[1]) {
         password = extract_url_param(body, "password");
-        if (!is_valid_password(password)) {
-            free(password);
-            try_sending_error(client_socket, 400);
-            return;
+        const char *invalid_password_msg = is_invalid_password(password);
+        if (invalid_password_msg) {
+            send_error_message(client_socket, 400, invalid_password_msg);
+        } else if (!db_update_user_password(context->db_conn, user_id, password)) {
+            send_error_message(client_socket, 500, "Couldn't update the password.");
         }
-        if (!db_update_user_password(context->db_conn, user_id, password)) {
-            free(password);
-            try_sending_error(client_socket, 500);
-            return;
-        }
+        free(password);
     }
     send_headers(client_socket, 204, NULL, NULL);
-    if (password) free(password);
-    if (email) free(email);
 }
 
 
@@ -709,15 +729,15 @@ void delete_user(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
     int user_id = check_session(req, context);
     if (user_id < 0) {
-        try_sending_error(client_socket, 401);
+        send_error_message(client_socket, 401, "Authentication required.");
         return;
     }
 
     if (!db_delete_user(context->db_conn, user_id)) {
-        try_sending_error(client_socket, 500);
-        return;
+        send_error_message(client_socket, 500, "Couldn't delete the user.");
+    } else {
+        send_headers(client_socket, 204, NULL, NULL);
     }
-    send_headers(client_socket, 204, NULL, NULL);
 }
 
 
@@ -725,7 +745,7 @@ void handle_http_request(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
     int req_method = req->method;
     if (req_method == -1) {
-        try_sending_error(client_socket, 400);
+        try_sending_error_file(client_socket, 400);
         return;
     }
 
@@ -735,13 +755,13 @@ void handle_http_request(HttpRequest *req, Task *context) {
         return;
     } else {                                                                    // static files
         if (req_method != GET) {
-            try_sending_error(client_socket, 405);
+            try_sending_error_file(client_socket, 405);
             return;
         }
         char file_path[MAX_PATH_LENGTH];
         snprintf(file_path, sizeof(file_path), "%s/static%s", DOCUMENT_ROOT, req->path);
         if (!is_path_safe(file_path)) {
-            try_sending_error(client_socket, 404);
+            try_sending_error_file(client_socket, 404);
             return;
         }
         try_sending_file(client_socket, file_path);

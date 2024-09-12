@@ -34,14 +34,14 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    document.getElementById('confirm-btn').addEventListener('click', function() {
+    document.getElementById('confirm-btn').addEventListener('click', function () {
         const todoIndex = this.dataset.todoIndex;
         const todoId = document.querySelectorAll('.todo-item')[todoIndex].dataset.todoId;
 
-        fetch(`/todo/${todoId}`, { method: 'DELETE' })
+        fetch(`/todo/${todoId}`, {method: 'DELETE'})
             .then(response => {
                 hidePopup('confirmation-popup');
-                handleResponse(response, 'To-Do completed!', 'Failed to complete a To-Do');
+                handleResponse(response, 'To-Do completed!');
             })
             .catch(handleError);
     });
@@ -87,18 +87,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     fetch(isEditMode ? `/todo/${todoId}` : '/todo', {
                         method: isEditMode ? 'PATCH' : 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
                         body: formData.toString()
                     })
-                    .then(response => {
-                        hidePopup('popup-form');
-                        handleResponse(
-                            response,
-                            isEditMode ? 'To-Do updated successfully!' : 'To-Do added successfully!',
-                            isEditMode ? 'Failed to update the To-Do' : 'Failed to add a To-Do'
-                        );
-                    })
-                    .catch(handleError);
+                        .then(response => {
+                            if (response.ok) hidePopup('popup-form');
+                            handleResponse(
+                                response,
+                                isEditMode ? 'To-Do updated successfully!' : 'To-Do added successfully!'
+                            );
+                        })
+                        .catch(handleError);
                 };
             });
         });
