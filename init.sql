@@ -8,9 +8,10 @@ CREATE TABLE IF NOT EXISTS users
 CREATE TABLE IF NOT EXISTS sessions
 (
     id         SERIAL PRIMARY KEY,
-    user_id    INT                NOT NULL,
-    token      VARCHAR(64) UNIQUE NOT NULL,
-    expires_at TIMESTAMP          NOT NULL,
+    user_id    INT             NOT NULL,
+    token      CHAR(64) UNIQUE NOT NULL,
+    csrf_token CHAR(64),
+    expires_at TIMESTAMP       NOT NULL,
     FOREIGN KEY (user_id)
         REFERENCES users (id)
         ON DELETE CASCADE
@@ -20,7 +21,7 @@ CREATE TABLE IF NOT EXISTS todos
 (
     id            SERIAL PRIMARY KEY,
     user_id       INT           NOT NULL,
-    creation_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    creation_time TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     summary       VARCHAR(128)  NOT NULL,
     task          VARCHAR(2048) NOT NULL,
     due_time      TIMESTAMP,

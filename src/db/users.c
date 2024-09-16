@@ -93,7 +93,7 @@ static bool delete_user_sessions(PGconn *conn, int user_id) {
 }
 
 
-QueryResult db_login_user(PGconn *conn, User *user, char *session_token) {
+QueryResult db_login_user(PGconn *conn, User *user, char *session_token, char *csrf_token) {
     PGresult *res = PQexec(conn, "BEGIN");
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
         fprintf(stderr, "Failed to begin transaction: %s", PQerrorMessage(conn));
@@ -132,7 +132,7 @@ QueryResult db_login_user(PGconn *conn, User *user, char *session_token) {
         if (!delete_user_sessions(conn, user_id)) {
             PQexec(conn, "ROLLBACK");
             return QRESULT_INTERNAL_ERROR;
-        } else if (!db_create_session(conn, user_id, session_token)) {
+        } else if (!db_create_session(conn, user_id, session_token, csrf_token)) {
             fprintf(stderr, "Failed to create session\n");
             PQexec(conn, "ROLLBACK");
             return QRESULT_INTERNAL_ERROR;

@@ -7,21 +7,20 @@
 #define SESSION_EXPIRY_DAYS 30
 
 
-static bool generate_session_token(char *token, size_t token_length) {
+static bool generate_token(char *token) {
     unsigned char random_bytes[SESSION_TOKEN_LENGTH];
     if (RAND_bytes(random_bytes, SESSION_TOKEN_LENGTH) != 1) {
         return false;
     }
-    for (int i = 0; i < SESSION_TOKEN_LENGTH; i++) {
+    for (int i = 0; i < SESSION_TOKEN_LENGTH; ++i) {
         sprintf(token + (i * 2), "%02x", random_bytes[i]);
     }
     return true;
 }
 
 
-bool db_create_session(PGconn *conn, int user_id, char *token) {
-    char session_token[SESSION_TOKEN_LENGTH * 2 + 1] = {0};
-    if (!generate_session_token(session_token, sizeof(session_token))) {
+bool db_create_session(PGconn *conn, int user_id, char *session_token, char *csrf_token) {
+    if (!generate_token(session_token) || !generate_token(csrf_token)) {
         return false;
     }
 
@@ -30,57 +29,55 @@ bool db_create_session(PGconn *conn, int user_id, char *token) {
     tm_info->tm_mday += SESSION_EXPIRY_DAYS;
     time_t expires = mktime(tm_info);
 
-    const char *query = "INSERT INTO sessions (user_id, token, expires_at) VALUES ($1, $2, to_timestamp($3))";
-    const char *params[3];
-    int param_lengths[3];
-    int param_formats[3] = {0, 0, 0};
     char user_id_str[12];
     char expires_str[21];
-
     snprintf(user_id_str, sizeof(user_id_str), "%d", user_id);
     snprintf(expires_str, sizeof(expires_str), "%ld", expires);
 
-    params[0] = user_id_str;
-    params[1] = session_token;
-    params[2] = expires_str;
+    const char *query = "INSERT INTO sessions (user_id, token, csrf_token, expires_at) VALUES ($1, $2, $3, to_timestamp($4))";
+    const char *params[4] = {user_id_str, session_token, csrf_token, expires_str};
+    int param_lengths[4] = {strlen(user_id_str), strlen(session_token), strlen(csrf_token), strlen(expires_str)};
+    int param_formats[4] = {0, 0, 0, 0};
 
-    param_lengths[0] = strlen(user_id_str);
-    param_lengths[1] = strlen(session_token);
-    param_lengths[2] = strlen(expires_str);
-
-    PGresult *res = PQexecParams(conn, query, 3, NULL, params, param_lengths, param_formats, 0);
+    PGresult *res = PQexecParams(conn, query, 4, NULL, params, param_lengths, param_formats, 0);
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
         fprintf(stderr, "Session creation failed: %s", PQerrorMessage(conn));
         PQclear(res);
         return false;
     }
     PQclear(res);
-    strcpy(token, session_token);
     return true;
 }
 
 
-int db_validate_session(PGconn *conn, const char *token) {
-    const char *query = "SELECT user_id FROM sessions WHERE token = $1 AND expires_at > NOW()";
+int db_validate_and_retrieve_session_info(PGconn *conn, const char *token, char *csrf_token) {
+    const char *query = "SELECT user_id, csrf_token FROM sessions WHERE token = $1 AND expires_at > NOW()";
     const char *params[1] = {token};
     int param_lengths[1] = {strlen(token)};
     int param_formats[1] = {0};
 
     PGresult *res = PQexecParams(conn, query, 1, NULL, params, param_lengths, param_formats, 0);
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-        fprintf(stderr, "Session validation failed: %s", PQerrorMessage(conn));
+        fprintf(stderr, "Session information retrieval failed: %s", PQerrorMessage(conn));
         PQclear(res);
-        return -1;
+        return QRESULT_INTERNAL_ERROR;
     }
 
     if (PQntuples(res) == 0) {
-        fprintf(stderr, "No session with provided token found\n");
+        fprintf(stderr, "No session information with provided token found\n");
         PQclear(res);
-        return -1;
+        return QRESULT_NONE_AFFECTED;
     }
     int user_id = atoi(PQgetvalue(res, 0, 0));
+    if (csrf_token) {
+        strcpy(csrf_token, PQgetvalue(res, 0, 1));
+    }
+
     PQclear(res);
-    return user_id;
+    // QueryResult has 5 elements represented as int from 0-4,
+    // so we add 5 when we return user index
+    // to avoid collisions between user indexes and enum values
+    return user_id + OFFSET;
 }
 
 

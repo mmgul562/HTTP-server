@@ -39,16 +39,6 @@ const handleResponse = (response, successMessage, redirect = false) => {
 
 const handleError = (error) => console.error('Error:', error);
 
-const setupForm = (btnId, formId, formTitle, submitHandler) => {
-    document.getElementById(btnId).addEventListener('click', () => {
-        showPopup('popup-form');
-        document.getElementById('form-title').textContent = formTitle;
-        const form = document.getElementById(formId);
-        form.reset();
-        form.onsubmit = submitHandler;
-    });
-};
-
 document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('close-btn').addEventListener('click', () => hidePopup('popup-form'));
 });

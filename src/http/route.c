@@ -13,7 +13,6 @@
 #define MAX_TEMPLATE_SIZE 8192
 #define PAGE_SIZE 8
 #define MAX_TODOS_HTML_SIZE 20240
-#define MAX_TOKEN_LENGTH 65
 #define MAX_COOKIE_SIZE 256
 
 
@@ -21,7 +20,7 @@ static void get_home(HttpRequest *req, Task *context);
 
 static void get_about(HttpRequest *req, Task *context);
 
-static void get_todo_page(HttpRequest *req, Task *context, int user_id);
+static void get_todo_page(HttpRequest *req, Task *context, int user_id, const char *csrf_token);
 
 static void create_todo(HttpRequest *req, Task *context);
 
@@ -79,6 +78,17 @@ static const Route *check_route(const char *url, Method method) {
 }
 
 
+static void skip_placeholder(char *buffer, const char *placeholder, char **remainder) {
+    char *placeholder_pos = strstr(buffer, placeholder);
+    if (placeholder_pos) {
+        *placeholder_pos = '\0';
+        *remainder = placeholder_pos + strlen(placeholder);
+    } else {
+        *remainder = buffer + strlen(buffer);
+    }
+}
+
+
 static char *read_template(const char *filename, const char *placeholder, char **remainder) {
     FILE *file = fopen(filename, "r");
     if (file == NULL) {
@@ -92,13 +102,7 @@ static char *read_template(const char *filename, const char *placeholder, char *
 
     fclose(file);
 
-    char *placeholder_pos = strstr(buffer, placeholder);
-    if (placeholder_pos) {
-        *placeholder_pos = '\0';
-        *remainder = placeholder_pos + strlen(placeholder);
-    } else {
-        *remainder = buffer + strlen(buffer);
-    }
+    skip_placeholder(buffer, placeholder, remainder);
 
     return buffer;
 }
@@ -226,12 +230,16 @@ static void get_authentication_page(HttpRequest *req, Task *context) {
 
 
 static void get_home(HttpRequest *req, Task *context) {
-    int user_id = check_session(req, context);
-    if (user_id < 0) {
+    int client_socket = context->client_socket;
+    char csrf_token[MAX_TOKEN_LENGTH + 1];
+    int user_id = check_session(req, context, csrf_token);
+    if (user_id == QRESULT_NONE_AFFECTED) {
         const char *location = "Location: /user\r\n";
-        send_headers(context->client_socket, 303, NULL, location);
+        send_headers(client_socket, 303, NULL, location);
+    } else if (user_id == QRESULT_INTERNAL_ERROR) {
+        try_sending_error_file(client_socket, 500);
     } else {
-        get_todo_page(req, context, user_id);
+        get_todo_page(req, context, user_id - OFFSET, csrf_token);
     }
 }
 
@@ -243,7 +251,7 @@ static void get_about(HttpRequest *req, Task *context) {
 }
 
 
-static void get_todo_page(HttpRequest *req, Task *context, int user_id) {
+static void get_todo_page(HttpRequest *req, Task *context, int user_id, const char *csrf_token) {
     int client_socket = context->client_socket;
     int page = 1;
 
@@ -272,10 +280,22 @@ static void get_todo_page(HttpRequest *req, Task *context, int user_id) {
         total_pages = (total_count + PAGE_SIZE - 1) / PAGE_SIZE;
     }
 
-    char *remainder;
+    char *csrf_remainder;
     const char *template_path = DOCUMENT_ROOT"/templates/todos_page.html";
-    char *template = read_template(template_path, "<!-- TODO_ITEMS -->", &remainder);
+    char *template = read_template(template_path, "<!-- CSRF_TOKEN -->", &csrf_remainder);
+
     if (!template) {
+        try_sending_error_file(client_socket, 500);
+        free_todos(todos, count);
+        return;
+    }
+
+    char csrf_html[164];
+    sprintf(csrf_html, "<meta name=\"csrf-token\" content=\"%s\">", csrf_token);
+
+    char *todos_remainder;
+    skip_placeholder(csrf_remainder, "<!-- TODO_ITEMS -->", &todos_remainder);
+    if (*todos_remainder == '\0') {
         try_sending_error_file(client_socket, 500);
         free_todos(todos, count);
         return;
@@ -301,8 +321,8 @@ static void get_todo_page(HttpRequest *req, Task *context, int user_id) {
                      "<p>%s</p>"
                      "</div></div>"
                      "<div class=\"todo-buttons\">"
-                     "<button class=\"edit-btn\">✏️</button>"
-                     "<button class=\"complete-btn\">✅</button>"
+                     "<button type=\"button\" class=\"edit-btn\">✏️</button>"
+                     "<button type=\"button\" class=\"complete-btn\">✅</button>"
                      "</div></div>",
                      todos[i].summary,
                      todos[i].task);
@@ -330,10 +350,12 @@ static void get_todo_page(HttpRequest *req, Task *context, int user_id) {
 
     send_headers(client_socket, 200, "text/html", NULL);
     send(client_socket, template, strlen(template), 0);
+    send(client_socket, csrf_html, strlen(csrf_html), 0);
+    send(client_socket, csrf_remainder, strlen(csrf_remainder), 0);
     if (count != 0) {
         send(client_socket, todos_html, strlen(todos_html), 0);
     }
-    send(client_socket, remainder, strlen(remainder), 0);
+    send(client_socket, todos_remainder, strlen(todos_remainder), 0);
 
     free(template);
     free(todos_html);
@@ -343,16 +365,24 @@ static void get_todo_page(HttpRequest *req, Task *context, int user_id) {
 
 static void create_todo(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
-    int user_id = check_session(req, context);
-    if (user_id < 0) {
+    char csrf_token[MAX_TOKEN_LENGTH + 1];
+    int user_id = check_session(req, context, csrf_token);
+    if (user_id == QRESULT_NONE_AFFECTED) {
         send_error_message(client_socket, 401, "Authentication required.");
         return;
+    } else if (user_id == QRESULT_INTERNAL_ERROR) {
+        send_error_message(client_socket, 500, "Couldn't retrieve session information.");
+        return;
     }
+    user_id -= OFFSET;
     const char *headers = req->headers;
     const char *body = req->body;
 
     if (strstr(headers, "\r\nContent-Type: application/x-www-form-urlencoded\r\n") == NULL) {
         send_error_message(client_socket, 415, "Content-Type should be set to application/x-www-form-urlencoded.");
+        return;
+    } else if (!check_csrf_token(req, csrf_token)) {
+        send_error_message(client_socket, 403, "No CSRF token found.");
         return;
     }
 
@@ -402,24 +432,29 @@ static void create_todo(HttpRequest *req, Task *context) {
 
 static void update_todo(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
-    int user_id = check_session(req, context);
-    if (user_id < 0) {
+    char csrf_token[MAX_TOKEN_LENGTH + 1];
+    int user_id = check_session(req, context, csrf_token);
+    if (user_id == QRESULT_NONE_AFFECTED) {
         send_error_message(client_socket, 401, "Authentication required.");
         return;
+    } else if (user_id == QRESULT_INTERNAL_ERROR) {
+        send_error_message(client_socket, 500, "Couldn't retrieve session information.");
+        return;
     }
+    user_id -= OFFSET;
     const char *headers = req->headers;
     const char *body = req->body;
 
     if (strstr(headers, "\r\nContent-Type: application/x-www-form-urlencoded\r\n") == NULL) {
         send_error_message(client_socket, 415, "Content-Type should be set to application/x-www-form-urlencoded.");
         return;
-    }
-
-    if (strlen(req->path) == 6) {
+    } else if (!check_csrf_token(req, csrf_token)) {
+        send_error_message(client_socket, 403, "No CSRF token found.");
+        return;
+    } else if (strlen(req->path) == 6) {
         send_error_message(client_socket, 400, "Expected to-do ID in the URL.");
         return;
     }
-
     int id;
     if (!validate_url_id(req->path + 6, &id)) {
         send_error_message(client_socket, 400, "Invalid to-do ID.");
@@ -464,17 +499,24 @@ static void update_todo(HttpRequest *req, Task *context) {
 
 static void delete_todo(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
-    int user_id = check_session(req, context);
-    if (user_id < 0) {
+    char csrf_token[MAX_TOKEN_LENGTH + 1];
+    int user_id = check_session(req, context, csrf_token);
+    if (user_id == QRESULT_NONE_AFFECTED) {
         send_error_message(client_socket, 401, "Authentication required.");
         return;
+    } else if (user_id == QRESULT_INTERNAL_ERROR) {
+        send_error_message(client_socket, 500, "Couldn't retrieve session information.");
+        return;
     }
+    user_id -= OFFSET;
 
-    if (strlen(req->path) == 6) {
+    if (!check_csrf_token(req, csrf_token)) {
+        send_error_message(client_socket, 403, "No CSRF token found.");
+        return;
+    } else if (strlen(req->path) == 6) {
         send_error_message(client_socket, 400, "Expected to-do ID in the URL.");
         return;
     }
-
     int id;
     if (!validate_url_id(req->path + 6, &id)) {
         send_error_message(client_socket, 400, "Invalid to-do ID.");
@@ -493,24 +535,42 @@ static void delete_todo(HttpRequest *req, Task *context) {
 
 
 static void get_user_page(HttpRequest *req, Task *context) {
-    int user_id = check_session(req, context);
-    if (user_id < 0) {
+    int client_socket = context->client_socket;
+    char csrf_token[MAX_TOKEN_LENGTH + 1];
+    int user_id = check_session(req, context, csrf_token);
+    if (user_id == QRESULT_NONE_AFFECTED) {
         get_authentication_page(req, context);
         return;
+    } else if (user_id == QRESULT_INTERNAL_ERROR) {
+        send_error_message(client_socket, 500, "Couldn't retrieve session information.");
+        return;
     }
+    user_id -= OFFSET;
 
-    int client_socket = context->client_socket;
     char *email = db_get_user_email(context->db_conn, user_id);
     if (!email) {
         try_sending_error_file(client_socket, 500);
         return;
     }
 
-    char *remainder;
+    char *csrf_remainder;
     const char *template_path = DOCUMENT_ROOT"/templates/user_page.html";
-    char *template = read_template(template_path, "<!-- USER_EMAIL -->", &remainder);
+    char *template = read_template(template_path, "<!-- CSRF_TOKEN -->", &csrf_remainder);
+
     if (!template) {
         try_sending_error_file(client_socket, 500);
+        free(email);
+        return;
+    }
+
+    char csrf_html[164];
+    sprintf(csrf_html, "<meta name=\"csrf-token\" content=\"%s\">", csrf_token);
+
+    char *email_remainder;
+    skip_placeholder(csrf_remainder, "<!-- USER_EMAIL -->", &email_remainder);
+    if (*email_remainder == '\0') {
+        try_sending_error_file(client_socket, 500);
+        free(email);
         return;
     }
 
@@ -519,8 +579,10 @@ static void get_user_page(HttpRequest *req, Task *context) {
 
     send_headers(client_socket, 200, "text/html", NULL);
     send(client_socket, template, strlen(template), 0);
+    send(client_socket, csrf_html, strlen(csrf_html), 0);
+    send(client_socket, csrf_remainder, strlen(csrf_remainder), 0);
     send(client_socket, user_html, strlen(user_html), 0);
-    send(client_socket, remainder, strlen(remainder), 0);
+    send(client_socket, email_remainder, strlen(email_remainder), 0);
 
     free(template);
     free(user_html);
@@ -619,9 +681,10 @@ static void login_user(HttpRequest *req, Task *context) {
     }
 
     User user = {.email = email, .password = password};
-    char session_token[MAX_TOKEN_LENGTH];
+    char session_token[MAX_TOKEN_LENGTH + 1];
+    char csrf_token[MAX_TOKEN_LENGTH + 1];
 
-    QueryResult qres = db_login_user(context->db_conn, &user, session_token);
+    QueryResult qres = db_login_user(context->db_conn, &user, session_token, csrf_token);
     if (qres == QRESULT_OK) {
         char cookie[MAX_COOKIE_SIZE];
         snprintf(cookie, sizeof(cookie), "Set-Cookie: session=%s; Path=/; HttpOnly; SameSite=Strict\r\n",
@@ -647,16 +710,19 @@ static void login_user(HttpRequest *req, Task *context) {
 
 static void logout_user(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
-    const char *cookie_header = strstr(req->headers, "\r\nCookie: ");
-
-    if (!cookie_header) {
+    char csrf_token[MAX_TOKEN_LENGTH + 1];
+    char session_token[MAX_TOKEN_LENGTH + 1];
+    int user_id = check_and_retrieve_session(req, context, csrf_token, session_token, MAX_TOKEN_LENGTH);
+    if (user_id == QRESULT_NONE_AFFECTED) {
         send_error_message(client_socket, 401, "Authentication required.");
+        return;
+    } else if (user_id == QRESULT_INTERNAL_ERROR) {
+        send_error_message(client_socket, 500, "Couldn't retrieve session information.");
         return;
     }
 
-    char session_token[MAX_TOKEN_LENGTH] = {0};
-    if (!extract_session_token(cookie_header, session_token, sizeof(session_token))) {
-        send_error_message(client_socket, 401, "Invalid session token.");
+    if (!check_csrf_token(req, csrf_token)) {
+        send_error_message(client_socket, 403, "No CSRF token found.");
         return;
     }
 
@@ -671,16 +737,24 @@ static void logout_user(HttpRequest *req, Task *context) {
 
 void update_user(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
-    int user_id = check_session(req, context);
-    if (user_id < 0) {
+    char csrf_token[MAX_TOKEN_LENGTH + 1];
+    int user_id = check_session(req, context, csrf_token);
+    if (user_id == QRESULT_NONE_AFFECTED) {
         send_error_message(client_socket, 401, "Authentication required.");
         return;
+    } else if (user_id == QRESULT_INTERNAL_ERROR) {
+        send_error_message(client_socket, 500, "Couldn't retrieve session information.");
+        return;
     }
+    user_id -= OFFSET;
     const char *headers = req->headers;
     const char *body = req->body;
 
     if (strstr(headers, "Content-Type: application/x-www-form-urlencoded") == NULL) {
         send_error_message(client_socket, 415, "Content-Type should be set to application/x-www-form-urlencoded.");
+        return;
+    } else if (!check_csrf_token(req, csrf_token)) {
+        send_error_message(client_socket, 403, "No CSRF token found.");
         return;
     }
 
@@ -727,9 +801,19 @@ void update_user(HttpRequest *req, Task *context) {
 
 void delete_user(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
-    int user_id = check_session(req, context);
-    if (user_id < 0) {
+    char csrf_token[MAX_TOKEN_LENGTH + 1];
+    int user_id = check_session(req, context, csrf_token);
+    if (user_id == QRESULT_NONE_AFFECTED) {
         send_error_message(client_socket, 401, "Authentication required.");
+        return;
+    } else if (user_id == QRESULT_INTERNAL_ERROR) {
+        send_error_message(client_socket, 500, "Couldn't retrieve session information.");
+        return;
+    }
+    user_id -= OFFSET;
+
+    if (!check_csrf_token(req, csrf_token)) {
+        send_error_message(client_socket, 403, "No CSRF token found.");
         return;
     }
 

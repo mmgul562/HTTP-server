@@ -27,6 +27,8 @@ document.addEventListener('DOMContentLoaded', () => {
         Array.from(dueTimeElements).forEach(el => formatTimeElement(el));
     }
 
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
     document.querySelectorAll('.complete-btn').forEach((btn, index) => {
         btn.addEventListener('click', () => {
             showPopup('confirmation-popup');
@@ -38,7 +40,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const todoIndex = this.dataset.todoIndex;
         const todoId = document.querySelectorAll('.todo-item')[todoIndex].dataset.todoId;
 
-        fetch(`/todo/${todoId}`, {method: 'DELETE'})
+        fetch(`/todo/${todoId}`, {
+            method: 'DELETE',
+            headers: {'X-CSRF-Token': csrfToken}
+        })
             .then(response => {
                 hidePopup('confirmation-popup');
                 handleResponse(response, 'To-Do completed!');
@@ -87,7 +92,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     fetch(isEditMode ? `/todo/${todoId}` : '/todo', {
                         method: isEditMode ? 'PATCH' : 'POST',
-                        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'X-CSRF-Token': csrfToken
+                        },
                         body: formData.toString()
                     })
                         .then(response => {

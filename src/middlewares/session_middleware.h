@@ -4,10 +4,14 @@
 #include "../http/request.h"
 #include "../http/util/task.h"
 
+#define MAX_TOKEN_LENGTH 64
 
-int check_session(HttpRequest *req, Task *context);
 
-bool extract_session_token(const char *cookie_header, char *session_token, size_t max_length);
+int check_session(HttpRequest *req, Task *context, char *csrf_token);
+
+int check_and_retrieve_session(HttpRequest *req, Task *context, char *csrf_token, char *session_token, size_t max_length);
+
+bool check_csrf_token(HttpRequest *req, const char *expected_csrf_token);
 
 
 #endif
