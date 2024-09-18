@@ -1,8 +1,31 @@
 CREATE TABLE IF NOT EXISTS users
 (
-    id              SERIAL PRIMARY KEY,
-    email           VARCHAR(128) UNIQUE NOT NULL,
-    hashed_password TEXT                NOT NULL
+    id                 SERIAL PRIMARY KEY,
+    email              VARCHAR(128) UNIQUE   NOT NULL,
+    password           VARCHAR(128)          NOT NULL,
+    is_verified        BOOLEAN DEFAULT FALSE NOT NULL,
+    verification_token CHAR(64) UNIQUE,
+    token_expires_at   TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS verification_results
+(
+    token      CHAR(64) PRIMARY KEY,
+    expires_at TIMESTAMP NOT NULL DEFAULT NOW() + INTERVAL '2 minutes',
+    message    VARCHAR(256),
+    success    BOOLEAN   NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS email_change_requests
+(
+    id                            SERIAL PRIMARY KEY,
+    user_id                       INT             NOT NULL,
+    new_email                     VARCHAR(128)    NOT NULL,
+    verification_token            CHAR(64) UNIQUE NOT NULL,
+    verification_token_expires_at TIMESTAMP       NOT NULL,
+    FOREIGN KEY (user_id)
+        REFERENCES users (id)
+        ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS sessions

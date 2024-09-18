@@ -2,11 +2,13 @@
 #include "../db/todos.h"
 #include "../db/users.h"
 #include "../db/sessions.h"
+#include "../db/verifications.h"
 #include "../middlewares/session_middleware.h"
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
 #include <arpa/inet.h>
+#include <curl/curl.h>
 
 #define MAX_PATH_LENGTH 304
 #define DOCUMENT_ROOT "../src/http/www"
@@ -30,6 +32,10 @@ static void delete_todo(HttpRequest *req, Task *context);
 
 static void get_user_page(HttpRequest *req, Task *context);
 
+static void verify_email(HttpRequest *req, Task *context);
+
+static void get_verification_page(HttpRequest *req, Task *context);
+
 static void signup_user(HttpRequest *req, Task *context);
 
 static void login_user(HttpRequest *req, Task *context);
@@ -46,6 +52,8 @@ static const Route ROUTES[] = {
         {"/todo",        POST,   create_todo},
         {"/todo/",       PATCH,  update_todo},
         {"/todo/",       DELETE, delete_todo},
+        {"/user/verify", POST,   verify_email},
+        {"/user/verify", GET,    get_verification_page},
         {"/user",        GET,    get_user_page},
         {"/user/signup", POST,   signup_user},
         {"/user/login",  POST,   login_user},
@@ -590,6 +598,110 @@ static void get_user_page(HttpRequest *req, Task *context) {
 }
 
 
+static void verify_email(HttpRequest *req, Task *context) {
+    int client_socket = context->client_socket;
+    const char *expected_keys[2] = {"email", "vtoken"};
+    bool found_keys[2];
+    memset(found_keys, 0, sizeof(found_keys));
+    VerificationResult result = {0};
+
+    if (!parse_url_data(req->query_string, expected_keys, 2, found_keys)) {
+        send_error_message(client_socket, 400, "Unexpected key. Only 'email' and 'vtoken' accepted.");
+        return;
+    } else if (!found_keys[0]) {
+        send_error_message(client_socket, 400, "E-Mail must be provided.");
+        return;
+    } else if (!found_keys[1]) {
+        send_error_message(client_socket, 400, "Verification token must be provided.");
+        return;
+    }
+
+    char *email = extract_url_param(req->query_string, "email");
+    char *provided_token = extract_url_param(req->query_string, "vtoken");
+
+    char expected_token[MAX_TOKEN_LENGTH + 1];
+    QueryResult qres = db_get_verification_token(context->db_conn, email, expected_token);
+    if (qres == QRESULT_INTERNAL_ERROR) {
+        send_error_message(client_socket, 500, "Couldn't retrieve verification information.");
+    } else if (qres == QRESULT_NONE_AFFECTED || qres == QRESULT_USER_ERROR) {
+        send_error_message(client_socket, 404, "Invalid or expired verification link.");
+    } else {
+        if (strcmp(provided_token, expected_token) != 0) {
+            result.message = "Invalid or expired verification link.";
+            result.success = false;
+        } else if (!db_verify_email(context->db_conn, email)) {
+            result.message = "Couldn't verify the e-mail.";
+            result.success = false;
+        } else {
+            result.token = provided_token;
+            result.message = "You can now sign in.";
+            result.success = true;
+        }
+        if (!db_create_verification_result(context->db_conn, &result)) {
+            send_error_message(client_socket, 500, "Couldn't create verification result.");
+        } else {
+            char location[128];
+            sprintf(location, "Location: /user/verify?v=%s\r\n", provided_token);
+            send_headers(client_socket, 303, NULL, location);
+        }
+    }
+    free(email);
+    free(provided_token);
+}
+
+
+static void get_verification_page(HttpRequest *req, Task *context) {
+    int client_socket = context->client_socket;
+    const char *expected_keys[] = {"v"};
+    bool found_keys[1];
+    memset(found_keys, 0, sizeof(found_keys));
+
+    if (!parse_url_data(req->query_string, expected_keys, 1, found_keys) || !found_keys[0]) {
+        try_sending_error_file(client_socket, 404);
+        return;
+    }
+
+    char *token = extract_url_param(req->query_string, "v");
+    VerificationResult result = {.token = token};
+
+    char *remainder;
+    const char *template_path = DOCUMENT_ROOT"/templates/verification_page.html";
+    char *template = read_template(template_path, "<!-- RESULT_BODY -->", &remainder);
+
+    if (!template) {
+        try_sending_error_file(client_socket, 500);
+        free(token);
+        return;
+    }
+
+    QueryResult qres = db_get_verification_result(context->db_conn, &result);
+    if (qres == QRESULT_INTERNAL_ERROR) {
+        try_sending_error_file(client_socket, 500);
+    } else if (qres == QRESULT_NONE_AFFECTED) {
+        try_sending_error_file(client_socket, 404);
+    } else {
+        if (result.expires_at < time(NULL)) {
+            try_sending_error_file(client_socket, 404);
+        } else {
+            char *result_html = malloc(MAX_TEMPLATE_SIZE);
+            sprintf(result_html, "<h2>Verification %s</h2>"
+                                 "<p>%s</p>",
+                    result.success ? "successful!" : "failed...",
+                    result.message);
+
+            send_headers(client_socket, 200, "text/html", NULL);
+            send(client_socket, template, strlen(template), 0);
+            send(client_socket, result_html, strlen(result_html), 0);
+            send(client_socket, remainder, strlen(remainder), 0);
+
+            free(result_html);
+        }
+    }
+    free(token);
+    free(template);
+}
+
+
 static void signup_user(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
     const char *headers = req->headers;
@@ -684,7 +796,7 @@ static void login_user(HttpRequest *req, Task *context) {
     char session_token[MAX_TOKEN_LENGTH + 1];
     char csrf_token[MAX_TOKEN_LENGTH + 1];
 
-    QueryResult qres = db_login_user(context->db_conn, &user, session_token, csrf_token);
+    QueryResult qres = db_login_user(context->db_conn, &user, session_token);
     if (qres == QRESULT_OK) {
         char cookie[MAX_COOKIE_SIZE];
         snprintf(cookie, sizeof(cookie), "Set-Cookie: session=%s; Path=/; HttpOnly; SameSite=Strict\r\n",
@@ -696,12 +808,16 @@ static void login_user(HttpRequest *req, Task *context) {
         strcat(header, cookie);
 
         send_headers(client_socket, 303, NULL, header);
-    } else if (qres == QRESULT_INTERNAL_ERROR){
-        send_error_message(client_socket, 500, "Couldn't sign in the user.");
+    } else if (qres == QRESULT_USER_ERROR) {
+        if (user.is_verified) {
+            send_error_message(client_socket, 401, "Invalid password.");
+        } else {
+            send_error_message(client_socket, 401, "E-Mail not verified.");
+        }
     } else if (qres == QRESULT_NONE_AFFECTED) {
         send_error_message(client_socket, 404, "Invalid e-mail.");
-    } else if (qres == QRESULT_USER_ERROR) {
-        send_error_message(client_socket, 401, "Invalid password.");
+    } else if (qres == QRESULT_INTERNAL_ERROR) {
+        send_error_message(client_socket, 500, "Couldn't sign in the user.");
     }
     free(email);
     free(password);

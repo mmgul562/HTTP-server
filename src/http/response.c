@@ -90,7 +90,7 @@ static void send_file(int client_socket, int fd) {
 
 void send_error_message(int client_socket, int status_code, const char *message) {
     char err_message[MAX_ERROR_JSON_LENGTH];
-    sprintf(err_message, "{\"error\": {\"message\": \"%s\"}}", message);
+    sprintf(err_message, "{\"error\": {\"message\": \"%s\"}}\n", message);
     char content_length[64];
     sprintf(content_length, "Content-Length: %ld\r\n", strlen(err_message));
 

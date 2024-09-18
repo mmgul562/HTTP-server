@@ -5,8 +5,10 @@ set(CMAKE_C_STANDARD 23)
 
 find_package(PostgreSQL REQUIRED)
 find_package(OpenSSL REQUIRED)
+find_package(CURL REQUIRED)
 
 include_directories(${PostgreSQL_INCLUDE_DIRS})
+include_directories(${CURL_INCLUDE_DIRS})
 
 add_executable(HTTP_server src/main.c
         src/http/request.c
@@ -27,6 +29,10 @@ add_executable(HTTP_server src/main.c
         src/http/route.c
         src/http/route.h
         src/db/util/query_result.h
+        src/db/util/generate_token.c
+        src/db/util/generate_token.h
+        src/db/verifications.c
+        src/db/verifications.h
 )
 
-target_link_libraries(HTTP_server ${PostgreSQL_LIBRARIES} argon2 OpenSSL::Crypto)
+target_link_libraries(HTTP_server ${PostgreSQL_LIBRARIES} argon2 OpenSSL::Crypto ${CURL_LIBRARIES})

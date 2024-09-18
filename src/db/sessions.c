@@ -1,22 +1,10 @@
 #include "sessions.h"
-#include <openssl/rand.h>
+#include "./util/generate_token.h"
 #include <time.h>
 #include <string.h>
+#include <stdlib.h>
 
-#define SESSION_TOKEN_LENGTH 32
 #define SESSION_EXPIRY_DAYS 30
-
-
-static bool generate_token(char *token) {
-    unsigned char random_bytes[SESSION_TOKEN_LENGTH];
-    if (RAND_bytes(random_bytes, SESSION_TOKEN_LENGTH) != 1) {
-        return false;
-    }
-    for (int i = 0; i < SESSION_TOKEN_LENGTH; ++i) {
-        sprintf(token + (i * 2), "%02x", random_bytes[i]);
-    }
-    return true;
-}
 
 
 bool db_create_session(PGconn *conn, int user_id, char *session_token, char *csrf_token) {
@@ -50,6 +38,7 @@ bool db_create_session(PGconn *conn, int user_id, char *session_token, char *csr
 }
 
 
+// TODO change this shit
 int db_validate_and_retrieve_session_info(PGconn *conn, const char *token, char *csrf_token) {
     const char *query = "SELECT user_id, csrf_token FROM sessions WHERE token = $1 AND expires_at > NOW()";
     const char *params[1] = {token};

@@ -47,13 +47,11 @@ int check_and_retrieve_session(HttpRequest *req, Task *context, char *csrf_token
         fprintf(stderr, "No Cookie Header found\n");
         return QRESULT_NONE_AFFECTED;
     }
-
     if (session_token) {
         if (!extract_session_token(cookie_header, session_token, max_length)) {
             return QRESULT_NONE_AFFECTED;
         }
     }
-
     return db_validate_and_retrieve_session_info(context->db_conn, session_token, csrf_token);
 }
 

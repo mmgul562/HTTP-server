@@ -8,7 +8,11 @@
 #include <pthread.h>
 #include <signal.h>
 #include <ctype.h>
+#include <time.h>
 
+#define MAX_RETRIES 10
+#define INITIAL_RETRY_DELAY_MS 100
+#define MAX_RETRY_DELAY_MS 10000
 #define MAX_QUEUE_SIZE 100
 
 
@@ -44,15 +48,39 @@ static PGconn *connect_to_db() {
              "dbname=%s user=%s password=%s host=%s port=%s",
              db_name, db_user, db_password, db_host, db_port);
 
-    PGconn *conn = PQconnectdb(conninfo);
+    PGconn *conn = NULL;
+    int retry_count = 0;
+    int retry_delay_ms = INITIAL_RETRY_DELAY_MS;
 
-    if (PQstatus(conn) != CONNECTION_OK) {
-        fprintf(stderr, "Connection to database failed: %s", PQerrorMessage(conn));
+    while (retry_count < MAX_RETRIES) {
+        conn = PQconnectdb(conninfo);
+
+        if (PQstatus(conn) == CONNECTION_OK) {
+            printf("Successfully connected to the database after %d retries\n", retry_count);
+            return conn;
+        }
+
+        fprintf(stderr, "Connection attempt %d failed: %s", retry_count + 1, PQerrorMessage(conn));
         PQfinish(conn);
-        return NULL;
+
+        if (retry_count < MAX_RETRIES - 1) {
+            printf("Retrying in %d ms...\n", retry_delay_ms);
+            struct timespec ts;
+            ts.tv_sec = retry_delay_ms / 1000;
+            ts.tv_nsec = (retry_delay_ms % 1000) * 1000000;
+            nanosleep(&ts, NULL);
+
+            retry_delay_ms *= 2;
+            if (retry_delay_ms > MAX_RETRY_DELAY_MS) {
+                retry_delay_ms = MAX_RETRY_DELAY_MS;
+            }
+        }
+
+        retry_count++;
     }
 
-    return conn;
+    fprintf(stderr, "Failed to connect to the database after %d attempts\n", MAX_RETRIES);
+    return NULL;
 }
 
 
