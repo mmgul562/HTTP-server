@@ -60,20 +60,13 @@ void free_todos(Todo *todos, int count) {
 
 
 static bool db_create_todo_no_duetime(PGconn *conn, Todo *todo) {
-    const char *query = "INSERT INTO todos (user_id, summary, task) VALUES ($1, $2, $3)";
-    const char *params[3];
-    int param_lengths[3];
-    int param_formats[3] = {0, 0, 0};
     char user_id_str[12];
-
     snprintf(user_id_str, sizeof(user_id_str), "%d", todo->user_id);
-    params[0] = user_id_str;
-    params[1] = todo->summary;
-    params[2] = todo->task;
 
-    param_lengths[0] = strlen(user_id_str);
-    param_lengths[1] = strlen(todo->summary);
-    param_lengths[2] = strlen(todo->task);
+    const char *query = "INSERT INTO todos (user_id, summary, task) VALUES ($1, $2, $3)";
+    const char *params[3] = {user_id_str, todo->summary, todo->task};
+    int param_lengths[3] = {strlen(user_id_str), strlen(todo->summary), strlen(todo->task)};
+    int param_formats[3] = {0, 0, 0};
 
     PGresult *res = PQexecParams(conn, query, 3, NULL, params, param_lengths, param_formats, 0);
 
@@ -90,22 +83,13 @@ bool db_create_todo(PGconn *conn, Todo *todo) {
     if (!todo->due_time) {
         return db_create_todo_no_duetime(conn, todo);
     }
-    const char *query = "INSERT INTO todos (user_id, summary, task, due_time) VALUES ($1, $2, $3, $4)";
-    const char *params[4];
-    int param_lengths[4];
-    int param_formats[4] = {0, 0, 0, 0};
     char user_id_str[12];
-
     snprintf(user_id_str, sizeof(user_id_str), "%d", todo->user_id);
-    params[0] = user_id_str;
-    params[1] = todo->summary;
-    params[2] = todo->task;
-    params[3] = todo->due_time;
 
-    param_lengths[0] = strlen(user_id_str);
-    param_lengths[1] = strlen(todo->summary);
-    param_lengths[2] = strlen(todo->task);
-    param_lengths[3] = strlen(todo->due_time);
+    const char *query = "INSERT INTO todos (user_id, summary, task, due_time) VALUES ($1, $2, $3, $4)";
+    const char *params[4] = {user_id_str, todo->summary, todo->task, todo->due_time};
+    int param_lengths[4] = {strlen(user_id_str), strlen(todo->summary), strlen(todo->task), strlen(todo->due_time)};
+    int param_formats[4] = {0, 0, 0, 0};
 
     PGresult *res = PQexecParams(conn, query, 4, NULL, params, param_lengths, param_formats, 0);
 

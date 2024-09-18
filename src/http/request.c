@@ -26,37 +26,34 @@ static int convert_method_str(const char *method) {
 }
 
 
-static char *url_decode(const char *src) {
-    size_t src_len = strlen(src);
-    char *decoded = malloc(src_len + 1);
-    size_t i, j;
+static void url_decode(const char *src, size_t src_len, char *dest) {
+    int i, j;
 
     for (i = 0, j = 0; i < src_len; ++i, ++j) {
         if (src[i] == '%' && i + 2 < src_len) {
             char high = hex_to_char(src[i + 1]);
             char low = hex_to_char(src[i + 2]);
             if (high >= 0 && low >= 0) {
-                decoded[j] = (char)((high << 4) | low);
+                dest[j] = (char)((high << 4) | low);
                 i += 2;
             } else {
-                decoded[j] = src[i];
+                dest[j] = src[i];
             }
         } else if (src[i] == '+') {
-            decoded[j] = ' ';
+            dest[j] = ' ';
         } else {
-            decoded[j] = src[i];
+            dest[j] = src[i];
         }
     }
-    decoded[j] = '\0';
-    return decoded;
+    dest[j] = '\0';
 }
 
 
-char *extract_url_param(const char *body, const char *key) {
+bool extract_url_param(const char *src, const char *key, char *dest, int max_len) {
     char search_key[256];
     snprintf(search_key, sizeof(search_key), "%s=", key);
 
-    char *start = strstr(body, search_key);
+    char *start = strstr(src, search_key);
     if (!start) return NULL;
     start += strlen(search_key);
 
@@ -64,13 +61,16 @@ char *extract_url_param(const char *body, const char *key) {
     if (!end) end = start + strlen(start);
 
     size_t len = end - start;
-    char *value = malloc(len + 1);
-    strncpy(value, start, len);
-    value[len] = '\0';
+    if (len > max_len) {
+        sprintf(dest, "");
+        return false;
+    }
+    char encoded[len + 1];
+    strncpy(encoded, start, len);
+    encoded[len] = '\0';
 
-    char *decoded = url_decode(value);
-    free(value);
-    return decoded;
+    url_decode(encoded, len, dest);
+    return true;
 }
 
 

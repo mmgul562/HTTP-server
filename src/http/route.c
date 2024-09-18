@@ -181,6 +181,9 @@ static bool is_valid_email(const char *email) {
     int atSymbolIndex = -1;
     int dotSymbolIndex = -1;
     size_t length = strlen(email);
+    if (length > DB_EMAIL_LEN) {
+        return false;
+    }
 
     for (int i = 0; i < length; i++) {
         if (email[i] == '@') {
@@ -199,17 +202,19 @@ static bool is_valid_email(const char *email) {
 }
 
 
-static const char *is_invalid_password(const char *password) {
+static bool is_valid_password(const char *password, char *msg) {
     size_t length = strlen(password);
+    if (length < 8) {
+        sprintf(msg, "Password must be at least 8 characters long.");
+        return false;
+    } else if (length > DB_PASSWORD_LEN) {
+        sprintf(msg,"Password cannot be longer than %d characters.", DB_PASSWORD_LEN);
+        return false;
+    }
+
     bool hasChar = false;
     bool hasDigit = false;
     bool hasSpecial = false;
-
-    if (length < 8) {
-        return "Password must be at least 8 characters long.";
-    } else if (length > 128) {
-        return "Password cannot be longer than 128 characters.";
-    }
 
     for (int i = 0; i < length; i++) {
         if (isalpha(password[i])) {
@@ -221,11 +226,13 @@ static const char *is_invalid_password(const char *password) {
         }
     }
     if (!hasChar) {
-        return "Password must have at least 1 letter.";
+        sprintf(msg, "Password must have at least 1 letter.");
+        return false;
     } else if (!(hasDigit || hasSpecial)) {
-        return "Password must have at least 1 number/special character.";
+        sprintf(msg, "Password must have at least 1 number/special character.");
+        return false;
     }
-    return NULL;
+    return true;
 }
 
 // HANDLERS
@@ -240,14 +247,16 @@ static void get_authentication_page(HttpRequest *req, Task *context) {
 static void get_home(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
     char csrf_token[MAX_TOKEN_LENGTH + 1];
-    int user_id = check_session(req, context, csrf_token);
-    if (user_id == QRESULT_NONE_AFFECTED) {
+    int user_id;
+
+    QueryResult qres = check_session(req->headers, context->db_conn, &user_id, csrf_token);
+    if (qres == QRESULT_NONE_AFFECTED) {
         const char *location = "Location: /user\r\n";
         send_headers(client_socket, 303, NULL, location);
-    } else if (user_id == QRESULT_INTERNAL_ERROR) {
+    } else if (qres == QRESULT_INTERNAL_ERROR) {
         try_sending_error_file(client_socket, 500);
     } else {
-        get_todo_page(req, context, user_id - OFFSET, csrf_token);
+        get_todo_page(req, context, user_id, csrf_token);
     }
 }
 
@@ -270,7 +279,12 @@ static void get_todo_page(HttpRequest *req, Task *context, int user_id, const ch
             try_sending_error_file(client_socket, 400);
             return;
         }
-        page = atoi(extract_url_param(req->query_string, "page"));
+        char page_str[12];
+        if (!extract_url_param(req->query_string, "page", page_str, sizeof(page_str) - 1)) {
+            try_sending_error_file(client_socket, 404);
+            return;
+        }
+        page = atoi(page_str);
         if (page < 1) page = 1;
     }
 
@@ -356,14 +370,23 @@ static void get_todo_page(HttpRequest *req, Task *context, int user_id, const ch
     }
     sprintf(p, "</div>");
 
-    send_headers(client_socket, 200, "text/html", NULL);
-    send(client_socket, template, strlen(template), 0);
-    send(client_socket, csrf_html, strlen(csrf_html), 0);
-    send(client_socket, csrf_remainder, strlen(csrf_remainder), 0);
+    size_t template_len = strlen(template);
+    size_t csrf_len = strlen(csrf_html);
+    size_t csrf_rem_len = strlen(csrf_remainder);
+    size_t todos_len = count > 0 ? strlen(todos_html) : 0;
+    size_t todos_rem_len = strlen(todos_remainder);
+    size_t total_len = template_len + csrf_len + csrf_rem_len + todos_len + todos_rem_len;
+    char content_length[64];
+    snprintf(content_length, sizeof(content_length), "Content-Length: %ld\r\n", total_len);
+
+    send_headers(client_socket, 200, "text/html", content_length);
+    send(client_socket, template, template_len, 0);
+    send(client_socket, csrf_html, csrf_len, 0);
+    send(client_socket, csrf_remainder, csrf_rem_len, 0);
     if (count != 0) {
-        send(client_socket, todos_html, strlen(todos_html), 0);
+        send(client_socket, todos_html, todos_len, 0);
     }
-    send(client_socket, todos_remainder, strlen(todos_remainder), 0);
+    send(client_socket, todos_remainder, todos_rem_len, 0);
 
     free(template);
     free(todos_html);
@@ -374,15 +397,16 @@ static void get_todo_page(HttpRequest *req, Task *context, int user_id, const ch
 static void create_todo(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
     char csrf_token[MAX_TOKEN_LENGTH + 1];
-    int user_id = check_session(req, context, csrf_token);
-    if (user_id == QRESULT_NONE_AFFECTED) {
+    int user_id;
+
+    QueryResult qres = check_session(req->headers, context->db_conn, &user_id, csrf_token);
+    if (qres == QRESULT_NONE_AFFECTED) {
         send_error_message(client_socket, 401, "Authentication required.");
         return;
-    } else if (user_id == QRESULT_INTERNAL_ERROR) {
+    } else if (qres == QRESULT_INTERNAL_ERROR) {
         send_error_message(client_socket, 500, "Couldn't retrieve session information.");
         return;
     }
-    user_id -= OFFSET;
     const char *headers = req->headers;
     const char *body = req->body;
 
@@ -409,47 +433,50 @@ static void create_todo(HttpRequest *req, Task *context) {
         return;
     }
 
-    char *summary = extract_url_param(body, "summary");
-    char *task = extract_url_param(body, "task");
-    char *due_time = extract_url_param(body, "duetime");
+    char summary[DB_SUMMARY_LEN + 1];
+    char *task = malloc(DB_TASK_LEN + 1);
+    char due_time[65];
 
-    bool summary_too_long = strlen(summary) > 128;
-    if (summary_too_long || strlen(task) > 2048) {
-        const char *msg = summary_too_long ? "'summary' value cannot be longer than 128 characters"
-                                           : "'task' value cannot be longer than 2048 characters";
+    if (!extract_url_param(body, "summary", summary, DB_SUMMARY_LEN)) {
+        char msg[64];
+        sprintf(msg, "Summary cannot be longer than %d characters.", DB_SUMMARY_LEN);
         send_error_message(client_socket, 400, msg);
-        free(summary);
-        free(task);
-        if (due_time) free(due_time);
-        return;
-    }
-
-    Todo todo = {.user_id = user_id, .summary = summary, .task = task, .due_time = due_time};
-
-    if (!db_create_todo(context->db_conn, &todo)) {
-        send_error_message(client_socket, 500, "Couldn't create to-do.");
+    } else if (!extract_url_param(body, "task", task, DB_TASK_LEN)) {
+        char msg[64];
+        sprintf(msg, "Task cannot be longer than %d characters.", DB_TASK_LEN);
+        send_error_message(client_socket, 400, msg);
     } else {
-        const char *location = "Location: /\r\n";
-        send_headers(client_socket, 201, NULL, location);
+        Todo todo = {.user_id = user_id, .summary = summary, .task = task};
+        if (extract_url_param(body, "duetime", due_time, sizeof(due_time) - 1)) {
+            todo.due_time = due_time;
+        } else {
+            todo.due_time = NULL;
+        }
+
+        if (!db_create_todo(context->db_conn, &todo)) {
+            send_error_message(client_socket, 500, "Couldn't create To-Do.");
+        } else {
+            const char *location = "Location: /\r\n";
+            send_headers(client_socket, 201, NULL, location);
+        }
     }
-    free(summary);
     free(task);
-    if (due_time) free(due_time);
 }
 
 
 static void update_todo(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
     char csrf_token[MAX_TOKEN_LENGTH + 1];
-    int user_id = check_session(req, context, csrf_token);
-    if (user_id == QRESULT_NONE_AFFECTED) {
+    int user_id;
+
+    QueryResult qres = check_session(req->headers, context->db_conn, &user_id, csrf_token);
+    if (qres == QRESULT_NONE_AFFECTED) {
         send_error_message(client_socket, 401, "Authentication required.");
         return;
-    } else if (user_id == QRESULT_INTERNAL_ERROR) {
+    } else if (qres == QRESULT_INTERNAL_ERROR) {
         send_error_message(client_socket, 500, "Couldn't retrieve session information.");
         return;
     }
-    user_id -= OFFSET;
     const char *headers = req->headers;
     const char *body = req->body;
 
@@ -484,39 +511,52 @@ static void update_todo(HttpRequest *req, Task *context) {
         return;
     }
 
-    char *summary = extract_url_param(body, "summary");
-    char *task = extract_url_param(body, "task");
-    char *due_time = extract_url_param(body, "duetime");
+    char summary[DB_SUMMARY_LEN + 1];
+    char *task = malloc(DB_TASK_LEN + 1);
+    char due_time[65];
 
-    Todo todo = {.id = id, .user_id = user_id, .summary = summary, .task = task, .due_time = due_time};
-
-    QueryResult qres = db_update_todo(context->db_conn, &todo);
-    if (qres == QRESULT_INTERNAL_ERROR) {
-        send_error_message(client_socket, 500, "Couldn't update the to-do.");
-    } else if (qres == QRESULT_NONE_AFFECTED) {
-        send_error_message(client_socket, 404, "Couldn't find the requested to-do.");
+    if (!extract_url_param(body, "summary", summary, DB_SUMMARY_LEN)) {
+        char msg[64];
+        sprintf(msg, "Summary cannot be longer than %d characters.", DB_SUMMARY_LEN);
+        send_error_message(client_socket, 400, msg);
+    } else if (!extract_url_param(body, "task", task, DB_TASK_LEN)) {
+        char msg[64];
+        sprintf(msg, "Task cannot be longer than %d characters.", DB_TASK_LEN);
+        send_error_message(client_socket, 400, msg);
     } else {
-        send_headers(client_socket, 204, NULL, NULL);
-    }
+        Todo todo = {.id = id, .user_id = user_id, .summary = summary, .task = task};
+        if (extract_url_param(body, "duetime", due_time, sizeof(due_time) - 1)) {
+            todo.due_time = due_time;
+        } else {
+            todo.due_time = NULL;
+        }
 
-    free(summary);
+        qres = db_update_todo(context->db_conn, &todo);
+        if (qres == QRESULT_INTERNAL_ERROR) {
+            send_error_message(client_socket, 500, "Couldn't update the to-do.");
+        } else if (qres == QRESULT_NONE_AFFECTED) {
+            send_error_message(client_socket, 404, "Couldn't find the requested to-do.");
+        } else {
+            send_headers(client_socket, 204, NULL, NULL);
+        }
+    }
     free(task);
-    if (due_time) free(due_time);
 }
 
 
 static void delete_todo(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
     char csrf_token[MAX_TOKEN_LENGTH + 1];
-    int user_id = check_session(req, context, csrf_token);
-    if (user_id == QRESULT_NONE_AFFECTED) {
+    int user_id;
+
+    QueryResult qres = check_session(req->headers, context->db_conn, &user_id, csrf_token);
+    if (qres == QRESULT_NONE_AFFECTED) {
         send_error_message(client_socket, 401, "Authentication required.");
         return;
-    } else if (user_id == QRESULT_INTERNAL_ERROR) {
+    } else if (qres == QRESULT_INTERNAL_ERROR) {
         send_error_message(client_socket, 500, "Couldn't retrieve session information.");
         return;
     }
-    user_id -= OFFSET;
 
     if (!check_csrf_token(req, csrf_token)) {
         send_error_message(client_socket, 403, "No CSRF token found.");
@@ -531,7 +571,7 @@ static void delete_todo(HttpRequest *req, Task *context) {
         return;
     }
 
-    QueryResult qres = db_delete_todo(context->db_conn, id, user_id);
+    qres = db_delete_todo(context->db_conn, id, user_id);
     if (qres == QRESULT_INTERNAL_ERROR) {
         send_error_message(client_socket, 500, "Couldn't delete the to-do.");
     } else if (qres == QRESULT_NONE_AFFECTED) {
@@ -545,15 +585,16 @@ static void delete_todo(HttpRequest *req, Task *context) {
 static void get_user_page(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
     char csrf_token[MAX_TOKEN_LENGTH + 1];
-    int user_id = check_session(req, context, csrf_token);
-    if (user_id == QRESULT_NONE_AFFECTED) {
+    int user_id;
+
+    QueryResult qres = check_session(req->headers, context->db_conn, &user_id, csrf_token);
+    if (qres == QRESULT_NONE_AFFECTED) {
         get_authentication_page(req, context);
         return;
-    } else if (user_id == QRESULT_INTERNAL_ERROR) {
+    } else if (qres == QRESULT_INTERNAL_ERROR) {
         send_error_message(client_socket, 500, "Couldn't retrieve session information.");
         return;
     }
-    user_id -= OFFSET;
 
     char *email = db_get_user_email(context->db_conn, user_id);
     if (!email) {
@@ -616,37 +657,40 @@ static void verify_email(HttpRequest *req, Task *context) {
         return;
     }
 
-    char *email = extract_url_param(req->query_string, "email");
-    char *provided_token = extract_url_param(req->query_string, "vtoken");
+    char email[DB_EMAIL_LEN + 1];
+    char provided_token[MAX_TOKEN_LENGTH + 1];
+    extract_url_param(req->query_string, "email", email, DB_EMAIL_LEN);
+    extract_url_param(req->query_string, "vtoken", provided_token, MAX_TOKEN_LENGTH);
 
     char expected_token[MAX_TOKEN_LENGTH + 1];
     QueryResult qres = db_get_verification_token(context->db_conn, email, expected_token);
     if (qres == QRESULT_INTERNAL_ERROR) {
         send_error_message(client_socket, 500, "Couldn't retrieve verification information.");
+        return;
     } else if (qres == QRESULT_NONE_AFFECTED || qres == QRESULT_USER_ERROR) {
         send_error_message(client_socket, 404, "Invalid or expired verification link.");
-    } else {
-        if (strcmp(provided_token, expected_token) != 0) {
-            result.message = "Invalid or expired verification link.";
-            result.success = false;
-        } else if (!db_verify_email(context->db_conn, email)) {
-            result.message = "Couldn't verify the e-mail.";
-            result.success = false;
-        } else {
-            result.token = provided_token;
-            result.message = "You can now sign in.";
-            result.success = true;
-        }
-        if (!db_create_verification_result(context->db_conn, &result)) {
-            send_error_message(client_socket, 500, "Couldn't create verification result.");
-        } else {
-            char location[128];
-            sprintf(location, "Location: /user/verify?v=%s\r\n", provided_token);
-            send_headers(client_socket, 303, NULL, location);
-        }
+        return;
     }
-    free(email);
-    free(provided_token);
+
+    if (strcmp(provided_token, expected_token) != 0) {
+        result.message = "Invalid or expired verification link.";
+        result.success = false;
+    } else if (!db_verify_email(context->db_conn, email)) {
+        result.message = "Couldn't verify the e-mail.";
+        result.success = false;
+    } else {
+        result.token = provided_token;
+        result.message = "You can now sign in.";
+        result.success = true;
+    }
+
+    if (!db_create_verification_result(context->db_conn, &result)) {
+        send_error_message(client_socket, 500, "Couldn't create verification result.");
+        return;
+    }
+    char location[128];
+    sprintf(location, "Location: /user/verify?v=%s\r\n", provided_token);
+    send_headers(client_socket, 303, NULL, location);
 }
 
 
@@ -661,7 +705,8 @@ static void get_verification_page(HttpRequest *req, Task *context) {
         return;
     }
 
-    char *token = extract_url_param(req->query_string, "v");
+    char token[MAX_TOKEN_LENGTH + 1];
+    extract_url_param(req->query_string, "v", token, MAX_TOKEN_LENGTH);
     VerificationResult result = {.token = token};
 
     char *remainder;
@@ -670,7 +715,6 @@ static void get_verification_page(HttpRequest *req, Task *context) {
 
     if (!template) {
         try_sending_error_file(client_socket, 500);
-        free(token);
         return;
     }
 
@@ -697,7 +741,6 @@ static void get_verification_page(HttpRequest *req, Task *context) {
             free(result_html);
         }
     }
-    free(token);
     free(template);
 }
 
@@ -727,15 +770,17 @@ static void signup_user(HttpRequest *req, Task *context) {
         return;
     }
 
-    char *email = extract_url_param(body, "email");
-    char *password = extract_url_param(body, "password");
+    char email[DB_EMAIL_LEN + 1];
+    char password[DB_PASSWORD_LEN + 1];
+    extract_url_param(body, "email", email, DB_EMAIL_LEN);
+    extract_url_param(body, "password", password, DB_PASSWORD_LEN);
 
-    const char *invalid_password_msg = is_invalid_password(password);
-    if (!is_valid_email(email) || invalid_password_msg) {
-        const char *msg = invalid_password_msg ? invalid_password_msg : "Invalid e-mail.";
+    char msg[64];
+    if (!is_valid_password(password, msg)) {
         send_error_message(client_socket, 400, msg);
-        free(email);
-        free(password);
+        return;
+    } else if (!is_valid_email(email)) {
+        send_error_message(client_socket, 400, "Invalid e-mail.");
         return;
     }
 
@@ -750,8 +795,6 @@ static void signup_user(HttpRequest *req, Task *context) {
         const char *location = "Location: /user\r\n";
         send_headers(client_socket, 201, NULL, location);
     }
-    free(email);
-    free(password);
 }
 
 
@@ -780,21 +823,19 @@ static void login_user(HttpRequest *req, Task *context) {
         return;
     }
 
-    char *email = extract_url_param(body, "email");
-    char *password = extract_url_param(body, "password");
+    char email[DB_EMAIL_LEN + 1];
+    char password[DB_PASSWORD_LEN + 1];
 
-    bool email_invalid = strlen(email) > 128;
-    if (email_invalid || strlen(password) > 128) {
-        const char *msg = email_invalid ? "Invalid e-mail." : "Invalid password.";
-        send_error_message(client_socket, 400, msg);
-        free(email);
-        free(password);
+    if (!extract_url_param(body, "email", email, DB_EMAIL_LEN)) {
+        send_error_message(client_socket, 401, "Invalid e-mail.");
+        return;
+    } else if (!extract_url_param(body, "password", password, DB_PASSWORD_LEN)) {
+        send_error_message(client_socket, 401, "Invalid password.");
         return;
     }
 
     User user = {.email = email, .password = password};
     char session_token[MAX_TOKEN_LENGTH + 1];
-    char csrf_token[MAX_TOKEN_LENGTH + 1];
 
     QueryResult qres = db_login_user(context->db_conn, &user, session_token);
     if (qres == QRESULT_OK) {
@@ -815,12 +856,10 @@ static void login_user(HttpRequest *req, Task *context) {
             send_error_message(client_socket, 401, "E-Mail not verified.");
         }
     } else if (qres == QRESULT_NONE_AFFECTED) {
-        send_error_message(client_socket, 404, "Invalid e-mail.");
+        send_error_message(client_socket, 401, "Invalid e-mail.");
     } else if (qres == QRESULT_INTERNAL_ERROR) {
         send_error_message(client_socket, 500, "Couldn't sign in the user.");
     }
-    free(email);
-    free(password);
 }
 
 
@@ -828,11 +867,13 @@ static void logout_user(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
     char csrf_token[MAX_TOKEN_LENGTH + 1];
     char session_token[MAX_TOKEN_LENGTH + 1];
-    int user_id = check_and_retrieve_session(req, context, csrf_token, session_token, MAX_TOKEN_LENGTH);
-    if (user_id == QRESULT_NONE_AFFECTED) {
+    int user_id;
+
+    QueryResult qres = check_and_retrieve_session(req->headers, context->db_conn, &user_id, csrf_token, session_token, MAX_TOKEN_LENGTH);
+    if (qres == QRESULT_NONE_AFFECTED) {
         send_error_message(client_socket, 401, "Authentication required.");
         return;
-    } else if (user_id == QRESULT_INTERNAL_ERROR) {
+    } else if (qres == QRESULT_INTERNAL_ERROR) {
         send_error_message(client_socket, 500, "Couldn't retrieve session information.");
         return;
     }
@@ -854,15 +895,16 @@ static void logout_user(HttpRequest *req, Task *context) {
 void update_user(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
     char csrf_token[MAX_TOKEN_LENGTH + 1];
-    int user_id = check_session(req, context, csrf_token);
-    if (user_id == QRESULT_NONE_AFFECTED) {
+    int user_id;
+
+    QueryResult qres = check_session(req->headers, context->db_conn, &user_id, csrf_token);
+    if (qres == QRESULT_NONE_AFFECTED) {
         send_error_message(client_socket, 401, "Authentication required.");
         return;
-    } else if (user_id == QRESULT_INTERNAL_ERROR) {
+    } else if (qres == QRESULT_INTERNAL_ERROR) {
         send_error_message(client_socket, 500, "Couldn't retrieve session information.");
         return;
     }
-    user_id -= OFFSET;
     const char *headers = req->headers;
     const char *body = req->body;
 
@@ -881,35 +923,41 @@ void update_user(HttpRequest *req, Task *context) {
     // email and password can't be changed in a single request
     if (!parse_url_data(body, expected_keys, 2, found_keys)) {
         send_error_message(client_socket, 400, "Unexpected key. Only 'email' or 'password' accepted.");
+        return;
     } else if (found_keys[0] && found_keys[1]) {
-        send_error_message(client_socket, 400, "'email' and 'password' cannot be updated in the same request.");
+        send_error_message(client_socket, 400, "E-Mail and password cannot be updated in the same request.");
+        return;
+    } else if (!found_keys[0] && !found_keys[1]) {
+        send_error_message(client_socket, 400, "Either e-mail or password must be provided.");
         return;
     }
 
-    char *email = NULL;
-    char *password = NULL;
+    char email[DB_EMAIL_LEN + 1];
+    char password[DB_PASSWORD_LEN + 1];
     if (found_keys[0]) {
-        email = extract_url_param(body, "email");
+        extract_url_param(body, "email", email, DB_EMAIL_LEN);
         if (!is_valid_email(email)) {
-            send_error_message(client_socket, 400, "Invalid e-mail.");
-        } else {
-            QueryResult qres = db_update_user_email(context->db_conn, user_id, email);
-            if (qres == QRESULT_INTERNAL_ERROR) {
-                send_error_message(client_socket, 500, "Couldn't update the e-mail.");
-            } else if (qres == QRESULT_UNIQUE_CONSTRAINT_ERROR) {
-                send_error_message(client_socket, 409, "E-Mail already taken.");
-            }
+            send_error_message(client_socket, 401, "Invalid e-mail.");
+            return;
         }
-        free(email);
+        qres = db_update_user_email(context->db_conn, user_id, email);
+        if (qres == QRESULT_INTERNAL_ERROR) {
+            send_error_message(client_socket, 500, "Couldn't update the e-mail.");
+            return;
+        } else if (qres == QRESULT_UNIQUE_CONSTRAINT_ERROR) {
+            send_error_message(client_socket, 409, "E-Mail already taken.");
+            return;
+        }
     } else if (found_keys[1]) {
-        password = extract_url_param(body, "password");
-        const char *invalid_password_msg = is_invalid_password(password);
-        if (invalid_password_msg) {
-            send_error_message(client_socket, 400, invalid_password_msg);
+        extract_url_param(body, "password", password, DB_PASSWORD_LEN);
+        char msg[64];
+        if (!is_valid_password(password, msg)) {
+            send_error_message(client_socket, 400, msg);
+            return;
         } else if (!db_update_user_password(context->db_conn, user_id, password)) {
             send_error_message(client_socket, 500, "Couldn't update the password.");
+            return;
         }
-        free(password);
     }
     send_headers(client_socket, 204, NULL, NULL);
 }
@@ -918,15 +966,16 @@ void update_user(HttpRequest *req, Task *context) {
 void delete_user(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
     char csrf_token[MAX_TOKEN_LENGTH + 1];
-    int user_id = check_session(req, context, csrf_token);
-    if (user_id == QRESULT_NONE_AFFECTED) {
+    int user_id;
+
+    QueryResult qres = check_session(req->headers, context->db_conn, &user_id, csrf_token);
+    if (qres == QRESULT_NONE_AFFECTED) {
         send_error_message(client_socket, 401, "Authentication required.");
         return;
-    } else if (user_id == QRESULT_INTERNAL_ERROR) {
+    } else if (qres == QRESULT_INTERNAL_ERROR) {
         send_error_message(client_socket, 500, "Couldn't retrieve session information.");
         return;
     }
-    user_id -= OFFSET;
 
     if (!check_csrf_token(req, csrf_token)) {
         send_error_message(client_socket, 403, "No CSRF token found.");

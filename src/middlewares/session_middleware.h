@@ -3,13 +3,14 @@
 
 #include "../http/request.h"
 #include "../http/util/task.h"
+#include "../db/util/query_result.h"
 
 #define MAX_TOKEN_LENGTH 64
 
 
-int check_session(HttpRequest *req, Task *context, char *csrf_token);
+QueryResult check_session(const char *headers, PGconn *conn, int *user_id, char *csrf_token);
 
-int check_and_retrieve_session(HttpRequest *req, Task *context, char *csrf_token, char *session_token, size_t max_length);
+QueryResult check_and_retrieve_session(const char *headers, PGconn *conn, int *user_id, char *csrf_token, char *session_token, size_t max_length);
 
 bool check_csrf_token(HttpRequest *req, const char *expected_csrf_token);
 

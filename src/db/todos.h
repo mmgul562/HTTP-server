@@ -4,6 +4,9 @@
 #include "util/query_result.h"
 #include <libpq-fe.h>
 
+#define DB_SUMMARY_LEN 128
+#define DB_TASK_LEN 2048
+
 
 typedef struct {
     int id;

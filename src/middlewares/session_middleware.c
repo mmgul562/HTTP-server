@@ -25,8 +25,8 @@ static bool extract_session_token(const char *cookie_header, char *session_token
 }
 
 
-int check_session(HttpRequest *req, Task *context, char *csrf_token) {
-    const char *cookie_header = strstr(req->headers, "\r\nCookie: ");
+QueryResult check_session(const char *headers, PGconn *conn, int *user_id, char *csrf_token) {
+    const char *cookie_header = strstr(headers, "\r\nCookie: ");
     if (!cookie_header) {
         fprintf(stderr, "No Cookie Header found\n");
         return QRESULT_NONE_AFFECTED;
@@ -37,12 +37,12 @@ int check_session(HttpRequest *req, Task *context, char *csrf_token) {
         return QRESULT_NONE_AFFECTED;
     }
 
-    return db_validate_and_retrieve_session_info(context->db_conn, session_token, csrf_token);
+    return db_validate_and_retrieve_session_info(conn, session_token, csrf_token, user_id);
 }
 
 
-int check_and_retrieve_session(HttpRequest *req, Task *context, char *csrf_token, char *session_token, size_t max_length) {
-    const char *cookie_header = strstr(req->headers, "\r\nCookie: ");
+QueryResult check_and_retrieve_session(const char *headers, PGconn *conn, int *user_id, char *csrf_token, char *session_token, size_t max_length) {
+    const char *cookie_header = strstr(headers, "\r\nCookie: ");
     if (!cookie_header) {
         fprintf(stderr, "No Cookie Header found\n");
         return QRESULT_NONE_AFFECTED;
@@ -52,7 +52,7 @@ int check_and_retrieve_session(HttpRequest *req, Task *context, char *csrf_token
             return QRESULT_NONE_AFFECTED;
         }
     }
-    return db_validate_and_retrieve_session_info(context->db_conn, session_token, csrf_token);
+    return db_validate_and_retrieve_session_info(conn, session_token, csrf_token, user_id);
 }
 
 

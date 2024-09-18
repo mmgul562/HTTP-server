@@ -38,8 +38,7 @@ bool db_create_session(PGconn *conn, int user_id, char *session_token, char *csr
 }
 
 
-// TODO change this shit
-int db_validate_and_retrieve_session_info(PGconn *conn, const char *token, char *csrf_token) {
+QueryResult db_validate_and_retrieve_session_info(PGconn *conn, const char *token, char *csrf_token, int *user_id) {
     const char *query = "SELECT user_id, csrf_token FROM sessions WHERE token = $1 AND expires_at > NOW()";
     const char *params[1] = {token};
     int param_lengths[1] = {strlen(token)};
@@ -57,16 +56,13 @@ int db_validate_and_retrieve_session_info(PGconn *conn, const char *token, char 
         PQclear(res);
         return QRESULT_NONE_AFFECTED;
     }
-    int user_id = atoi(PQgetvalue(res, 0, 0));
+    *user_id = atoi(PQgetvalue(res, 0, 0));
     if (csrf_token) {
         strcpy(csrf_token, PQgetvalue(res, 0, 1));
     }
 
     PQclear(res);
-    // QueryResult has 5 elements represented as int from 0-4,
-    // so we add 5 when we return user index
-    // to avoid collisions between user indexes and enum values
-    return user_id + OFFSET;
+    return QRESULT_OK;
 }
 
 

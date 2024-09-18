@@ -5,6 +5,9 @@
 #include <libpq-fe.h>
 #include <time.h>
 
+#define DB_EMAIL_LEN 128
+#define DB_PASSWORD_LEN 128
+
 
 typedef struct {
     int id;
