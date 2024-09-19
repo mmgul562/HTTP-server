@@ -1,6 +1,7 @@
 #include "route.h"
 #include "../db/todos.h"
 #include "../db/users.h"
+#include "../db/email_change_requests.h"
 #include "../db/sessions.h"
 #include "../db/verifications.h"
 #include "../middlewares/session_middleware.h"
@@ -36,6 +37,10 @@ static void verify_email(HttpRequest *req, Task *context);
 
 static void get_verification_page(HttpRequest *req, Task *context);
 
+static void verify_new_email(HttpRequest *req, Task *context);
+
+static void reset_password(HttpRequest *req, Task *context);
+
 static void signup_user(HttpRequest *req, Task *context);
 
 static void login_user(HttpRequest *req, Task *context);
@@ -54,6 +59,8 @@ static const Route ROUTES[] = {
         {"/todo/",       DELETE, delete_todo},
         {"/user/verify", POST,   verify_email},
         {"/user/verify", GET,    get_verification_page},
+        {"/user/verify", PATCH,  verify_new_email},
+        {"/user/reset",  POST,   reset_password},
         {"/user",        GET,    get_user_page},
         {"/user/signup", POST,   signup_user},
         {"/user/login",  POST,   login_user},
@@ -208,7 +215,7 @@ static bool is_valid_password(const char *password, char *msg) {
         sprintf(msg, "Password must be at least 8 characters long.");
         return false;
     } else if (length > DB_PASSWORD_LEN) {
-        sprintf(msg,"Password cannot be longer than %d characters.", DB_PASSWORD_LEN);
+        sprintf(msg, "Password cannot be longer than %d characters.", DB_PASSWORD_LEN);
         return false;
     }
 
@@ -673,9 +680,11 @@ static void verify_email(HttpRequest *req, Task *context) {
     }
 
     if (strcmp(provided_token, expected_token) != 0) {
+        result.token = provided_token;
         result.message = "Invalid or expired verification link.";
         result.success = false;
     } else if (!db_verify_email(context->db_conn, email)) {
+        result.token = provided_token;
         result.message = "Couldn't verify the e-mail.";
         result.success = false;
     } else {
@@ -742,6 +751,86 @@ static void get_verification_page(HttpRequest *req, Task *context) {
         }
     }
     free(template);
+}
+
+
+static void verify_new_email(HttpRequest *req, Task *context) {
+    int client_socket = context->client_socket;
+    const char *expected_keys[2] = {"email", "vtoken"};
+    bool found_keys[2];
+    memset(found_keys, 0, sizeof(found_keys));
+    VerificationResult result = {0};
+
+    if (!parse_url_data(req->query_string, expected_keys, 2, found_keys)) {
+        send_error_message(client_socket, 400, "Unexpected key. Only 'email' and 'vtoken' accepted.");
+        return;
+    } else if (!found_keys[0]) {
+        send_error_message(client_socket, 400, "E-Mail must be provided.");
+        return;
+    } else if (!found_keys[1]) {
+        send_error_message(client_socket, 400, "Verification token must be provided.");
+        return;
+    }
+
+    char email[DB_EMAIL_LEN + 1];
+    char provided_token[MAX_TOKEN_LENGTH + 1];
+    extract_url_param(req->query_string, "email", email, DB_EMAIL_LEN);
+    extract_url_param(req->query_string, "vtoken", provided_token, MAX_TOKEN_LENGTH);
+
+    int user_id;
+    char expected_token[MAX_TOKEN_LENGTH + 1];
+    QueryResult qres = db_get_new_verification_token(context->db_conn, email, &user_id, expected_token);
+    if (qres == QRESULT_INTERNAL_ERROR) {
+        send_error_message(client_socket, 500, "Couldn't retrieve verification information.");
+        return;
+    } else if (qres == QRESULT_NONE_AFFECTED) {
+        send_error_message(client_socket, 404, "Invalid or expired verification link.");
+        return;
+    }
+
+    result.token = provided_token;
+    if (strcmp(provided_token, expected_token) != 0) {
+        result.message = "Invalid or expired verification link.";
+        result.success = false;
+
+        if (!db_create_verification_result(context->db_conn, &result)) {
+            send_error_message(client_socket, 500, "Couldn't create verification result.");
+            return;
+        }
+        char location[128];
+        sprintf(location, "Location: /user/verify?v=%s\r\n", provided_token);
+        send_headers(client_socket, 303, NULL, location);
+        return;
+    }
+
+    Verifying:
+    qres = db_verify_new_email(context->db_conn, user_id, email, provided_token);
+    if (qres == QRESULT_INTERNAL_ERROR || qres == QRESULT_NONE_AFFECTED) {
+        result.message = "Couldn't verify the e-mail.";
+        result.success = false;
+    } else if (qres == QRESULT_UNIQUE_CONSTRAINT_ERROR) {
+        if (!db_delete_unverified_user(context->db_conn, email)) {
+            result.message = "Couldn't verify the e-mail.";
+            result.success = false;
+        } else {
+            goto Verifying;
+        }
+    } else {
+        result.message = "E-Mail has been updated.";
+        result.success = true;
+    }
+    if (!db_create_verification_result(context->db_conn, &result)) {
+        send_error_message(client_socket, 500, "Couldn't create verification result.");
+        return;
+    }
+    char location[128];
+    sprintf(location, "Location: /user/verify?v=%s\r\n", provided_token);
+    send_headers(client_socket, 303, NULL, location);
+}
+
+// TODO
+static void reset_password(HttpRequest *req, Task *context) {
+
 }
 
 
@@ -869,7 +958,8 @@ static void logout_user(HttpRequest *req, Task *context) {
     char session_token[MAX_TOKEN_LENGTH + 1];
     int user_id;
 
-    QueryResult qres = check_and_retrieve_session(req->headers, context->db_conn, &user_id, csrf_token, session_token, MAX_TOKEN_LENGTH);
+    QueryResult qres = check_and_retrieve_session(req->headers, context->db_conn, &user_id, csrf_token, session_token,
+                                                  MAX_TOKEN_LENGTH);
     if (qres == QRESULT_NONE_AFFECTED) {
         send_error_message(client_socket, 401, "Authentication required.");
         return;
@@ -937,11 +1027,11 @@ void update_user(HttpRequest *req, Task *context) {
     if (found_keys[0]) {
         extract_url_param(body, "email", email, DB_EMAIL_LEN);
         if (!is_valid_email(email)) {
-            send_error_message(client_socket, 401, "Invalid e-mail.");
+            send_error_message(client_socket, 400, "Invalid e-mail.");
             return;
         }
-        qres = db_update_user_email(context->db_conn, user_id, email);
-        if (qres == QRESULT_INTERNAL_ERROR) {
+        qres = db_create_email_change_request(context->db_conn, user_id, email);
+        if (qres == QRESULT_INTERNAL_ERROR || qres == QRESULT_NONE_AFFECTED) {
             send_error_message(client_socket, 500, "Couldn't update the e-mail.");
             return;
         } else if (qres == QRESULT_UNIQUE_CONSTRAINT_ERROR) {

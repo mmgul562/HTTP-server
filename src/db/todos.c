@@ -10,7 +10,7 @@ int db_get_total_todos_count(PGconn *conn) {
     PGresult *res = PQexec(conn, query);
 
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-        fprintf(stderr, "Counting TODOs failed: %s", PQerrorMessage(conn));
+        fprintf(stderr, "TODOs counting failed: %s", PQerrorMessage(conn));
         PQclear(res);
         return -1;
     }
@@ -116,7 +116,7 @@ static QueryResult db_update_todo_no_duetime(PGconn *conn, Todo *todo) {
     PGresult *res = PQexecParams(conn, query, 4, NULL, params, param_lengths, param_formats, 0);
 
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-        fprintf(stderr, "TODO updating failed: %s", PQerrorMessage(conn));
+        fprintf(stderr, "TODO update failed: %s", PQerrorMessage(conn));
         return QRESULT_INTERNAL_ERROR;
     }
     int affected_rows = atoi(PQcmdTuples(res));
@@ -142,7 +142,7 @@ QueryResult db_update_todo(PGconn *conn, Todo *todo) {
     PGresult *res = PQexecParams(conn, query, 5, NULL, params, param_lengths, param_formats, 0);
 
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-        fprintf(stderr, "TODO updating failed: %s", PQerrorMessage(conn));
+        fprintf(stderr, "TODO update failed: %s", PQerrorMessage(conn));
         return QRESULT_INTERNAL_ERROR;
     }
     int affected_rows = atoi(PQcmdTuples(res));

@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS users
 
 CREATE TABLE IF NOT EXISTS verification_results
 (
-    token      CHAR(64) PRIMARY KEY,
+    id         SERIAL PRIMARY KEY,
+    token      CHAR(64),
     expires_at TIMESTAMP NOT NULL DEFAULT NOW() + INTERVAL '2 minutes',
     message    VARCHAR(256),
     success    BOOLEAN   NOT NULL
@@ -18,11 +19,11 @@ CREATE TABLE IF NOT EXISTS verification_results
 
 CREATE TABLE IF NOT EXISTS email_change_requests
 (
-    id                            SERIAL PRIMARY KEY,
-    user_id                       INT             NOT NULL,
-    new_email                     VARCHAR(128)    NOT NULL,
-    verification_token            CHAR(64) UNIQUE NOT NULL,
-    verification_token_expires_at TIMESTAMP       NOT NULL,
+    id                 SERIAL PRIMARY KEY,
+    verification_token CHAR(64) UNIQUE NOT NULL,
+    user_id            INT             NOT NULL,
+    new_email          VARCHAR(128)    NOT NULL,
+    token_expires_at   TIMESTAMP       NOT NULL,
     FOREIGN KEY (user_id)
         REFERENCES users (id)
         ON DELETE CASCADE

@@ -6,7 +6,7 @@ const hidePopup = (popupId) => {
     document.getElementById(popupId).classList.add('hidden');
 };
 
-const handleResponse = (response, successMessage, redirect = false) => {
+const handleResponse = (response, successMessage, redirect = false, timeout = 1200) => {
     if (response.ok || (redirect && response.redirected)) {
         const popupId = 'success-popup';
         document.getElementById(popupId).innerHTML = `<p>${successMessage}</p>`;
@@ -16,12 +16,12 @@ const handleResponse = (response, successMessage, redirect = false) => {
             setTimeout(() => {
                 hidePopup(popupId);
                 location.replace(response.url);
-            }, 1200);
+            }, timeout);
         } else {
             setTimeout(() => {
                 hidePopup(popupId);
                 location.reload();
-            }, 1200);
+            }, timeout);
         }
     } else {
         response.json().then(data => {

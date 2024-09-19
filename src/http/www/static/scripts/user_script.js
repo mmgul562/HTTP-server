@@ -30,7 +30,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (response.ok) hidePopup('popup-form');
                         handleResponse(
                             response,
-                            isEmail ? `E-Mail updated successfully!` : `Password updated successfully!`
+                            isEmail ? `Verification e-mail was sent to provided address.` : `Password updated successfully!`,
+                            false, 4000
                         );
                     })
                     .catch(handleError);

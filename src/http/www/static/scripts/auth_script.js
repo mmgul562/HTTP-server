@@ -35,8 +35,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (response.ok) hidePopup('popup-form');
                     handleResponse(
                         response,
-                        isSignIn ? 'Successfully signed in!' : 'Successfully signed up!',
-                        isSignIn
+                        isSignIn ? 'Successfully signed in!' : 'Successfully signed up! Check your inbox and verify your e-mail.',
+                        isSignIn,
+                        isSignIn ? 1200 : 4000
                     );
                 })
                 .catch(handleError);

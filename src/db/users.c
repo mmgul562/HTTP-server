@@ -86,6 +86,54 @@ char *db_get_user_email(PGconn *conn, int id) {
 }
 
 
+static bool check_user_verified(PGconn *conn, const char *email, bool *is_verified) {
+    const char *query = "SELECT is_verified FROM users WHERE email = $1";
+    const char *params[1] = {email};
+    int param_lengths[1] = {strlen(email)};
+    int param_formats[1] = {0};
+
+    PGresult *res = PQexecParams(conn, query, 1, NULL, params, param_lengths, param_formats, 0);
+
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        fprintf(stderr, "User verification info retrieval failed: %s", PQerrorMessage(conn));
+        PQclear(res);
+        return false;
+    }
+    if (PQntuples(res) == 0) {
+        PQclear(res);
+        return false;
+    }
+
+    *is_verified = strcmp(PQgetvalue(res, 0, 0), "t") == 0;
+
+    PQclear(res);
+    return true;
+}
+
+
+static bool update_unverified_user(PGconn *conn, const char *email, const char *password, const char *token, const char *expiry) {
+    const char *query = "UPDATE users SET password = $1, verification_token = $2, token_expires_at = to_timestamp($3) WHERE email = $4";
+    const char *params[4] = {password, token, expiry, email};
+    int param_lengths[4] = {strlen(password), strlen(token), strlen(expiry), strlen(email)};
+    int param_formats[4] = {0, 0, 0, 0};
+
+    PGresult *res = PQexecParams(conn, query, 4, NULL, params, param_lengths, param_formats, 0);
+
+    if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+        fprintf(stderr, "Unverified user update failed: %s", PQerrorMessage(conn));
+        PQclear(res);
+        return false;
+    }
+    if (PQcmdTuples(res) == 0) {
+        PQclear(res);
+        return false;
+    }
+
+    PQclear(res);
+    return true;
+}
+
+
 QueryResult db_signup_user(PGconn *conn, User *user) {
     uint8_t salt[SALT_LEN];
     char encoded[ENCODED_LEN];
@@ -127,7 +175,18 @@ QueryResult db_signup_user(PGconn *conn, User *user) {
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
         if (strcmp(PQresultErrorField(res, PG_DIAG_SQLSTATE), "23505") == 0) {
             PQclear(res);
-            return QRESULT_UNIQUE_CONSTRAINT_ERROR;
+            bool is_verified;
+            if (!check_user_verified(conn, user->email, &is_verified)) {
+                return QRESULT_INTERNAL_ERROR;
+            }
+            if (is_verified) {
+                return QRESULT_UNIQUE_CONSTRAINT_ERROR;
+            } else {
+                if (!update_unverified_user(conn, user->email, encoded, verification_token, expiry_str)) {
+                    return QRESULT_INTERNAL_ERROR;
+                }
+                return QRESULT_OK;
+            }
         }
         fprintf(stderr, "User registration failed: %s", PQerrorMessage(conn));
         PQclear(res);
@@ -147,6 +206,22 @@ static bool delete_user_sessions(PGconn *conn, int user_id) {
 
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
         fprintf(stderr, "User session deletion failed: %s", PQerrorMessage(conn));
+        PQclear(res);
+        return false;
+    }
+    if (PQcmdTuples(res) == 0) {
+        PQclear(res);
+        return false;
+    }
+    PQclear(res);
+    return true;
+}
+
+
+static bool rollback_transaction(PGconn *conn, PGresult *res) {
+    res = PQexec(conn, "ROLLBACK");
+    if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+        fprintf(stderr, "Failed to rollback transaction: %s", PQerrorMessage(conn));
         PQclear(res);
         return false;
     }
@@ -174,12 +249,14 @@ QueryResult db_login_user(PGconn *conn, User *user, char *session_token) {
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
         fprintf(stderr, "User login failed: %s", PQerrorMessage(conn));
         PQclear(res);
-        PQexec(conn, "ROLLBACK");
+        rollback_transaction(conn, res);
         return QRESULT_INTERNAL_ERROR;
     }
     if (PQntuples(res) == 0) {
         PQclear(res);
-        PQexec(conn, "ROLLBACK");
+        if (!rollback_transaction(conn, res)) {
+            return QRESULT_INTERNAL_ERROR;
+        }
         return QRESULT_NONE_AFFECTED;
     }
 
@@ -190,7 +267,9 @@ QueryResult db_login_user(PGconn *conn, User *user, char *session_token) {
     user->is_verified = is_verified;
     if (!is_verified) {
         PQclear(res);
-        PQexec(conn, "ROLLBACK");
+        if (!rollback_transaction(conn, res)) {
+            return QRESULT_INTERNAL_ERROR;
+        }
         return QRESULT_USER_ERROR;
     }
 
@@ -200,15 +279,17 @@ QueryResult db_login_user(PGconn *conn, User *user, char *session_token) {
 
     if (verify_result == ARGON2_OK) {
         if (!delete_user_sessions(conn, user_id)) {
-            PQexec(conn, "ROLLBACK");
+            rollback_transaction(conn, res);
             return QRESULT_INTERNAL_ERROR;
         } else if (!db_create_session(conn, user_id, session_token, csrf_token)) {
             fprintf(stderr, "Failed to create session\n");
-            PQexec(conn, "ROLLBACK");
+            rollback_transaction(conn, res);
             return QRESULT_INTERNAL_ERROR;
         }
     } else {
-        PQexec(conn, "ROLLBACK");
+        if (!rollback_transaction(conn, res)) {
+            return QRESULT_INTERNAL_ERROR;
+        }
         return QRESULT_USER_ERROR;
     }
     res = PQexec(conn, "COMMIT");
@@ -240,6 +321,10 @@ QueryResult db_update_user_email(PGconn *conn, int id, const char *email) {
         fprintf(stderr, "User email updating failed: %s", PQerrorMessage(conn));
         PQclear(res);
         return QRESULT_INTERNAL_ERROR;
+    }
+    if (PQcmdTuples(res) == 0) {
+        PQclear(res);
+        return QRESULT_NONE_AFFECTED;
     }
     PQclear(res);
     return QRESULT_OK;
@@ -279,7 +364,33 @@ bool db_update_user_password(PGconn *conn, int id, const char *password) {
     PGresult *res = PQexecParams(conn, query, 2, NULL, params, param_lengths, param_formats, 0);
 
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-        fprintf(stderr, "User password updating failed: %s", PQerrorMessage(conn));
+        fprintf(stderr, "User password update failed: %s", PQerrorMessage(conn));
+        return false;
+    }
+    if (PQcmdTuples(res) == 0) {
+        PQclear(res);
+        return false;
+    }
+    PQclear(res);
+    return true;
+}
+
+
+bool db_delete_unverified_user(PGconn *conn, const char *email) {
+    const char *query = "DELETE FROM users WHERE email = $1 AND is_verified = false";
+    const char *params[1] = {email};
+    int param_lengths[1] = {strlen(email)};
+    int param_formats[1] = {0};
+
+    PGresult *res = PQexecParams(conn, query, 1, NULL, params, param_lengths, param_formats, 0);
+
+    if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+        fprintf(stderr, "User deletion failed: %s", PQerrorMessage(conn));
+        PQclear(res);
+        return false;
+    }
+    if (PQcmdTuples(res) == 0) {
+        PQclear(res);
         return false;
     }
     PQclear(res);
@@ -295,6 +406,10 @@ bool db_delete_user(PGconn *conn, int id) {
 
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
         fprintf(stderr, "User deletion failed: %s", PQerrorMessage(conn));
+        PQclear(res);
+        return false;
+    }
+    if (PQcmdTuples(res) == 0) {
         PQclear(res);
         return false;
     }

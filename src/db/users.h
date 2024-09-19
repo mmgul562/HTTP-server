@@ -30,6 +30,8 @@ QueryResult db_update_user_email(PGconn *conn, int id, const char *email);
 
 bool db_update_user_password(PGconn *conn, int id, const char *password);
 
+bool db_delete_unverified_user(PGconn *conn, const char *email);
+
 bool db_delete_user(PGconn *conn, int id);
 
 

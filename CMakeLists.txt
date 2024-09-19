@@ -33,6 +33,8 @@ add_executable(HTTP_server src/main.c
         src/db/util/generate_token.h
         src/db/verifications.c
         src/db/verifications.h
+        src/db/email_change_requests.c
+        src/db/email_change_requests.h
 )
 
 target_link_libraries(HTTP_server ${PostgreSQL_LIBRARIES} argon2 OpenSSL::Crypto ${CURL_LIBRARIES})
