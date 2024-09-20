@@ -14,9 +14,12 @@ int db_get_total_todos_count(PGconn *conn) {
         PQclear(res);
         return -1;
     }
-    int count = atoi(PQgetvalue(res, 0, 0));
+    if (PQcmdTuples(res) == 0) {
+        PQclear(res);
+        return QRESULT_NONE_AFFECTED;
+    }
     PQclear(res);
-    return count;
+    return QRESULT_OK;
 }
 
 
@@ -119,9 +122,12 @@ static QueryResult db_update_todo_no_duetime(PGconn *conn, Todo *todo) {
         fprintf(stderr, "TODO update failed: %s", PQerrorMessage(conn));
         return QRESULT_INTERNAL_ERROR;
     }
-    int affected_rows = atoi(PQcmdTuples(res));
+    if (PQcmdTuples(res) == 0) {
+        PQclear(res);
+        return QRESULT_NONE_AFFECTED;
+    }
     PQclear(res);
-    return affected_rows > 0 ? QRESULT_OK : QRESULT_NONE_AFFECTED;
+    return QRESULT_OK;
 }
 
 
@@ -145,9 +151,12 @@ QueryResult db_update_todo(PGconn *conn, Todo *todo) {
         fprintf(stderr, "TODO update failed: %s", PQerrorMessage(conn));
         return QRESULT_INTERNAL_ERROR;
     }
-    int affected_rows = atoi(PQcmdTuples(res));
+    if (PQcmdTuples(res) == 0) {
+        PQclear(res);
+        return QRESULT_NONE_AFFECTED;
+    }
     PQclear(res);
-    return affected_rows > 0 ? QRESULT_OK : QRESULT_NONE_AFFECTED;
+    return QRESULT_OK;
 }
 
 
@@ -162,7 +171,10 @@ QueryResult db_delete_todo(PGconn *conn, int id, int user_id) {
         PQclear(res);
         return QRESULT_INTERNAL_ERROR;
     }
-    int affected_rows = atoi(PQcmdTuples(res));
+    if (PQcmdTuples(res) == 0) {
+        PQclear(res);
+        return QRESULT_NONE_AFFECTED;
+    }
     PQclear(res);
-    return affected_rows > 0 ? QRESULT_OK : QRESULT_NONE_AFFECTED;
+    return QRESULT_OK;
 }

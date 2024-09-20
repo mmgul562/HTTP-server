@@ -10,9 +10,34 @@
 #define SALT_LEN 16
 #define ENCODED_LEN 128
 #define VERIFICATION_EXPIRY_HRS 24
+#define PASSWORD_RESET_EXPIRY_HRS 1
 
 
-QueryResult db_get_verification_token(PGconn *conn, const char *email, char *verification_token) {
+bool db_check_reset_password_verification_token(PGconn *conn, const char *token, bool *exists) {
+    const char *query = "SELECT EXISTS (SELECT 1 FROM users WHERE is_verified = true AND verification_token = $1 LIMIT 1)";
+    const char *params[1] = {token};
+    int param_lengths[1] = {strlen(token)};
+    int param_formats[1] = {0};
+
+    PGresult *res = PQexecParams(conn, query, 1, NULL, params, param_lengths, param_formats, 0);
+
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        fprintf(stderr, "Token verification checking failed: %s", PQerrorMessage(conn));
+        PQclear(res);
+        return false;
+    }
+    if (PQntuples(res) == 0) {
+        PQclear(res);
+        return false;
+    }
+    *exists = strcmp(PQgetvalue(res, 0, 0), "t") == 0;
+
+    PQclear(res);
+    return true;
+}
+
+
+QueryResult db_get_verification_token(PGconn *conn, const char *email, char *token, bool *is_verified) {
     const char *query = "SELECT is_verified, verification_token FROM users WHERE email = $1 AND token_expires_at > NOW()";
     const char *params[1] = {email};
     int param_lengths[1] = {strlen(email)};
@@ -29,13 +54,42 @@ QueryResult db_get_verification_token(PGconn *conn, const char *email, char *ver
         PQclear(res);
         return QRESULT_NONE_AFFECTED;
     }
-
-    if (strcmp(PQgetvalue(res, 0, 0), "t") == 0) {
-        PQclear(res);
-        return QRESULT_USER_ERROR;
+    if (is_verified) {
+        *is_verified = strcmp(PQgetvalue(res, 0, 0), "t") == 0;
     }
-    strcpy(verification_token, PQgetvalue(res, 0, 1));
+    strcpy(token, PQgetvalue(res, 0, 1));
 
+    PQclear(res);
+    return QRESULT_OK;
+}
+
+
+QueryResult db_set_verification_token(PGconn *conn, const char *email) {
+    char verification_token[SESSION_TOKEN_LENGTH * 2 + 1];
+    if (!generate_token(verification_token)) {
+        fprintf(stderr, "Error generating verification token\n");
+        return QRESULT_INTERNAL_ERROR;
+    }
+    time_t expiry_time = time(NULL) + (PASSWORD_RESET_EXPIRY_HRS * 3600);
+    char expiry_str[21];
+    snprintf(expiry_str, sizeof(expiry_str), "%ld", expiry_time);
+
+    const char *query = "UPDATE users SET verification_token = $1, token_expires_at = to_timestamp($2) WHERE email = $3";
+    const char *params[3] = {verification_token, expiry_str, email};
+    int param_lengths[3] = {strlen(verification_token), strlen(expiry_str), strlen(email)};
+    int param_formats[3] = {0, 0, 0};
+
+    PGresult *res = PQexecParams(conn, query, 3, NULL, params, param_lengths, param_formats, 0);
+
+    if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+        fprintf(stderr, "Verification info update failed: %s", PQerrorMessage(conn));
+        PQclear(res);
+        return QRESULT_INTERNAL_ERROR;
+    }
+    if (PQcmdTuples(res) == 0) {
+        PQclear(res);
+        return QRESULT_NONE_AFFECTED;
+    }
     PQclear(res);
     return QRESULT_OK;
 }
@@ -63,7 +117,7 @@ bool db_verify_email(PGconn *conn, const char *email) {
 }
 
 
-char *db_get_user_email(PGconn *conn, int id) {
+bool db_get_user_email(PGconn *conn, int id, char *email) {
     char query[64];
     sprintf(query, "SELECT email FROM users WHERE id = %d", id);
 
@@ -72,17 +126,17 @@ char *db_get_user_email(PGconn *conn, int id) {
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
         fprintf(stderr, "User email retrieval failed: %s", PQerrorMessage(conn));
         PQclear(res);
-        return NULL;
+        return false;
     }
     if (PQntuples(res) == 0) {
         fprintf(stderr, "No user with provided ID was found\n");
         PQclear(res);
-        return NULL;
+        return false;
     }
-    char *email = strdup(PQgetvalue(res, 0, 0));
+    strcpy(email, PQgetvalue(res, 0, 0));
 
     PQclear(res);
-    return email;
+    return true;
 }
 
 
@@ -103,9 +157,7 @@ static bool check_user_verified(PGconn *conn, const char *email, bool *is_verifi
         PQclear(res);
         return false;
     }
-
     *is_verified = strcmp(PQgetvalue(res, 0, 0), "t") == 0;
-
     PQclear(res);
     return true;
 }
@@ -128,7 +180,6 @@ static bool update_unverified_user(PGconn *conn, const char *email, const char *
         PQclear(res);
         return false;
     }
-
     PQclear(res);
     return true;
 }
@@ -328,6 +379,48 @@ QueryResult db_update_user_email(PGconn *conn, int id, const char *email) {
     }
     PQclear(res);
     return QRESULT_OK;
+}
+
+
+bool db_reset_user_password(PGconn *conn, const char *vtoken, const char *password) {
+    uint8_t salt[SALT_LEN];
+    char encoded[ENCODED_LEN];
+
+    if (RAND_bytes(salt, SALT_LEN) != 1) {
+        fprintf(stderr, "Error generating random salt\n");
+        return false;
+    }
+    uint32_t t_cost = 2;
+    uint32_t m_cost = (1 << 16);
+    uint32_t parallelism = 1;
+
+    int result = argon2id_hash_encoded(t_cost, m_cost, parallelism,
+                                       password, strlen(password),
+                                       salt, SALT_LEN,
+                                       HASH_LEN, encoded, ENCODED_LEN);
+
+    if (result != ARGON2_OK) {
+        fprintf(stderr, "Error hashing password: %s\n", argon2_error_message(result));
+        return false;
+    }
+
+    const char *query = "UPDATE users SET password = $1 WHERE verification_token = $2";
+    const char *params[2] = {encoded, vtoken};
+    int param_lengths[2] = {strlen(encoded), strlen(vtoken)};
+    int param_formats[2] = {0, 0};
+
+    PGresult *res = PQexecParams(conn, query, 2, NULL, params, param_lengths, param_formats, 0);
+
+    if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+        fprintf(stderr, "User password reset failed: %s", PQerrorMessage(conn));
+        return false;
+    }
+    if (PQcmdTuples(res) == 0) {
+        PQclear(res);
+        return false;
+    }
+    PQclear(res);
+    return true;
 }
 
 

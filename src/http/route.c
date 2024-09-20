@@ -39,6 +39,10 @@ static void get_verification_page(HttpRequest *req, Task *context);
 
 static void verify_new_email(HttpRequest *req, Task *context);
 
+static void forgot_password(HttpRequest *req, Task *context);
+
+static void get_reset_password_page(HttpRequest *req, Task *context);
+
 static void reset_password(HttpRequest *req, Task *context);
 
 static void signup_user(HttpRequest *req, Task *context);
@@ -52,21 +56,23 @@ static void update_user(HttpRequest *req, Task *context);
 static void delete_user(HttpRequest *req, Task *context);
 
 static const Route ROUTES[] = {
-        {"/",            GET,    get_home},
-        {"/about",       GET,    get_about},
-        {"/todo",        POST,   create_todo},
-        {"/todo/",       PATCH,  update_todo},
-        {"/todo/",       DELETE, delete_todo},
-        {"/user/verify", POST,   verify_email},
-        {"/user/verify", GET,    get_verification_page},
-        {"/user/verify", PATCH,  verify_new_email},
-        {"/user/reset",  POST,   reset_password},
-        {"/user",        GET,    get_user_page},
-        {"/user/signup", POST,   signup_user},
-        {"/user/login",  POST,   login_user},
-        {"/user/logout", POST,   logout_user},
-        {"/user",        PATCH,  update_user},
-        {"/user",        DELETE, delete_user}
+        {"/", GET, get_home},
+        {"/about", GET, get_about},
+        {"/todo", POST, create_todo},
+        {"/todo/", PATCH, update_todo},
+        {"/todo/", DELETE, delete_todo},
+        {"/user/verify", POST, verify_email},
+        {"/user/verify", GET, get_verification_page},
+        {"/user/verify", PATCH, verify_new_email},
+        {"/user/forgot-password", POST, forgot_password},
+        {"/user/reset-password", GET, get_reset_password_page},
+        {"/user/reset-password", POST, reset_password},
+        {"/user", GET, get_user_page},
+        {"/user/signup", POST, signup_user},
+        {"/user/login", POST, login_user},
+        {"/user/logout", POST, logout_user},
+        {"/user", PATCH, update_user},
+        {"/user", DELETE, delete_user}
 };
 
 static const int ROUTES_COUNT = sizeof(ROUTES) / sizeof(Route);
@@ -603,8 +609,8 @@ static void get_user_page(HttpRequest *req, Task *context) {
         return;
     }
 
-    char *email = db_get_user_email(context->db_conn, user_id);
-    if (!email) {
+    char email[129];
+    if (!db_get_user_email(context->db_conn, user_id, email)) {
         try_sending_error_file(client_socket, 500);
         return;
     }
@@ -615,7 +621,6 @@ static void get_user_page(HttpRequest *req, Task *context) {
 
     if (!template) {
         try_sending_error_file(client_socket, 500);
-        free(email);
         return;
     }
 
@@ -626,23 +631,31 @@ static void get_user_page(HttpRequest *req, Task *context) {
     skip_placeholder(csrf_remainder, "<!-- USER_EMAIL -->", &email_remainder);
     if (*email_remainder == '\0') {
         try_sending_error_file(client_socket, 500);
-        free(email);
         return;
     }
 
-    char *user_html = malloc(MAX_TEMPLATE_SIZE + 128);
-    sprintf(user_html, "%s", email);
+    char *email_html = malloc(MAX_TEMPLATE_SIZE + 128);
+    sprintf(email_html, "%s", email);
 
-    send_headers(client_socket, 200, "text/html", NULL);
-    send(client_socket, template, strlen(template), 0);
-    send(client_socket, csrf_html, strlen(csrf_html), 0);
-    send(client_socket, csrf_remainder, strlen(csrf_remainder), 0);
-    send(client_socket, user_html, strlen(user_html), 0);
-    send(client_socket, email_remainder, strlen(email_remainder), 0);
+    size_t template_len = strlen(template);
+    size_t csrf_len = strlen(csrf_html);
+    size_t csrf_rem_len = strlen(csrf_remainder);
+    size_t email_len = strlen(email_html);
+    size_t email_rem_len = strlen(email_remainder);
+    size_t total_len = template_len + csrf_len + csrf_rem_len + email_len + email_rem_len;
+    char content_length[64];
+    snprintf(content_length, sizeof(content_length), "Content-Length: %ld\r\n", total_len);
+
+
+    send_headers(client_socket, 200, "text/html", content_length);
+    send(client_socket, template, template_len, 0);
+    send(client_socket, csrf_html, csrf_len, 0);
+    send(client_socket, csrf_remainder, csrf_rem_len, 0);
+    send(client_socket, email_html, email_len, 0);
+    send(client_socket, email_remainder, email_rem_len, 0);
 
     free(template);
-    free(user_html);
-    free(email);
+    free(email_html);
 }
 
 
@@ -653,14 +666,8 @@ static void verify_email(HttpRequest *req, Task *context) {
     memset(found_keys, 0, sizeof(found_keys));
     VerificationResult result = {0};
 
-    if (!parse_url_data(req->query_string, expected_keys, 2, found_keys)) {
-        send_error_message(client_socket, 400, "Unexpected key. Only 'email' and 'vtoken' accepted.");
-        return;
-    } else if (!found_keys[0]) {
-        send_error_message(client_socket, 400, "E-Mail must be provided.");
-        return;
-    } else if (!found_keys[1]) {
-        send_error_message(client_socket, 400, "Verification token must be provided.");
+    if (!parse_url_data(req->query_string, expected_keys, 2, found_keys) || !found_keys[0] || !found_keys[1]) {
+        try_sending_error_file(client_socket, 405);
         return;
     }
 
@@ -669,12 +676,13 @@ static void verify_email(HttpRequest *req, Task *context) {
     extract_url_param(req->query_string, "email", email, DB_EMAIL_LEN);
     extract_url_param(req->query_string, "vtoken", provided_token, MAX_TOKEN_LENGTH);
 
+    bool is_verified;
     char expected_token[MAX_TOKEN_LENGTH + 1];
-    QueryResult qres = db_get_verification_token(context->db_conn, email, expected_token);
+    QueryResult qres = db_get_verification_token(context->db_conn, email, expected_token, &is_verified);
     if (qres == QRESULT_INTERNAL_ERROR) {
         send_error_message(client_socket, 500, "Couldn't retrieve verification information.");
         return;
-    } else if (qres == QRESULT_NONE_AFFECTED || qres == QRESULT_USER_ERROR) {
+    } else if (qres == QRESULT_NONE_AFFECTED || is_verified) {
         send_error_message(client_socket, 404, "Invalid or expired verification link.");
         return;
     }
@@ -730,26 +738,38 @@ static void get_verification_page(HttpRequest *req, Task *context) {
     QueryResult qres = db_get_verification_result(context->db_conn, &result);
     if (qres == QRESULT_INTERNAL_ERROR) {
         try_sending_error_file(client_socket, 500);
+        free(template);
+        return;
     } else if (qres == QRESULT_NONE_AFFECTED) {
         try_sending_error_file(client_socket, 404);
-    } else {
-        if (result.expires_at < time(NULL)) {
-            try_sending_error_file(client_socket, 404);
-        } else {
-            char *result_html = malloc(MAX_TEMPLATE_SIZE);
-            sprintf(result_html, "<h2>Verification %s</h2>"
-                                 "<p>%s</p>",
-                    result.success ? "successful!" : "failed...",
-                    result.message);
-
-            send_headers(client_socket, 200, "text/html", NULL);
-            send(client_socket, template, strlen(template), 0);
-            send(client_socket, result_html, strlen(result_html), 0);
-            send(client_socket, remainder, strlen(remainder), 0);
-
-            free(result_html);
-        }
+        free(template);
+        return;
     }
+
+    if (result.expires_at < time(NULL)) {
+        try_sending_error_file(client_socket, 404);
+        free(template);
+        return;
+    }
+    char *result_html = malloc(MAX_TEMPLATE_SIZE);
+    sprintf(result_html, "<h2>Verification %s</h2>"
+                         "<p>%s</p>",
+            result.success ? "successful!" : "failed...",
+            result.message);
+
+    size_t template_len = strlen(template);
+    size_t result_len = strlen(result_html);
+    size_t remainder_len = strlen(remainder);
+    size_t total_len = template_len + result_len + remainder_len;
+    char content_length[64];
+    snprintf(content_length, sizeof(content_length), "Content-Length: %ld\r\n", total_len);
+
+    send_headers(client_socket, 200, "text/html", content_length);
+    send(client_socket, template, template_len, 0);
+    send(client_socket, result_html, result_len, 0);
+    send(client_socket, remainder, remainder_len, 0);
+
+    free(result_html);
     free(template);
 }
 
@@ -761,14 +781,8 @@ static void verify_new_email(HttpRequest *req, Task *context) {
     memset(found_keys, 0, sizeof(found_keys));
     VerificationResult result = {0};
 
-    if (!parse_url_data(req->query_string, expected_keys, 2, found_keys)) {
-        send_error_message(client_socket, 400, "Unexpected key. Only 'email' and 'vtoken' accepted.");
-        return;
-    } else if (!found_keys[0]) {
-        send_error_message(client_socket, 400, "E-Mail must be provided.");
-        return;
-    } else if (!found_keys[1]) {
-        send_error_message(client_socket, 400, "Verification token must be provided.");
+    if (!parse_url_data(req->query_string, expected_keys, 2, found_keys) || !found_keys[0] || !found_keys[1]) {
+        try_sending_error_file(client_socket, 405);
         return;
     }
 
@@ -828,9 +842,123 @@ static void verify_new_email(HttpRequest *req, Task *context) {
     send_headers(client_socket, 303, NULL, location);
 }
 
-// TODO
-static void reset_password(HttpRequest *req, Task *context) {
 
+static void forgot_password(HttpRequest *req, Task *context) {
+    int client_socket = context->client_socket;
+    const char *headers = req->headers;
+    const char *body = req->body;
+
+    if (strstr(headers, "Content-Type: application/x-www-form-urlencoded") == NULL) {
+        send_error_message(client_socket, 415, "Content-Type should be set to application/x-www-form-urlencoded.");
+        return;
+    }
+
+    const char *expected_keys[] = {"email"};
+    bool found_keys[1];
+    memset(found_keys, 0, sizeof(found_keys));
+
+    if (!parse_url_data(body, expected_keys, 1, found_keys) || !found_keys[0]) {
+        try_sending_error_file(client_socket, 405);
+        return;
+    }
+
+    char email[DB_EMAIL_LEN + 1];
+    if (!extract_url_param(body, "email", email, DB_EMAIL_LEN)) {
+        send_error_message(client_socket, 401, "Invalid e-mail.");
+        return;
+    }
+
+    QueryResult qres = db_set_verification_token(context->db_conn, email);
+    if (qres == QRESULT_INTERNAL_ERROR) {
+        send_error_message(client_socket, 500, "Couldn't create password-reset link.");
+        return;
+    } else if (qres == QRESULT_NONE_AFFECTED) {
+        send_error_message(client_socket, 404, "Invalid e-mail.");
+        return;
+    }
+
+    // should send an email here
+    send_headers(client_socket, 204, NULL, NULL);
+}
+
+
+static void get_reset_password_page(HttpRequest *req, Task *context) {
+    int client_socket = context->client_socket;
+    const char *expected_keys[] = {"v"};
+    bool found_keys[1];
+    memset(found_keys, 0, sizeof(found_keys));
+
+    if (!parse_url_data(req->query_string, expected_keys, 1, found_keys) || !found_keys[0]) {
+        try_sending_error_file(client_socket, 404);
+        return;
+    }
+
+    char token[MAX_TOKEN_LENGTH + 1];
+    extract_url_param(req->query_string, "v", token, MAX_TOKEN_LENGTH);
+
+    bool exists;
+    if (!db_check_reset_password_verification_token(context->db_conn, token, &exists)) {
+        try_sending_error_file(client_socket, 500);
+        return;
+    } else if (!exists) {
+        try_sending_error_file(client_socket, 404);
+        return;
+    }
+
+    const char *reset_pswd_path = DOCUMENT_ROOT"/reset_password_page.html";
+    try_sending_file(client_socket, reset_pswd_path);
+}
+
+
+static void reset_password(HttpRequest *req, Task *context) {
+    int client_socket = context->client_socket;
+    const char *headers = req->headers;
+    const char *body = req->body;
+
+    if (strstr(headers, "Content-Type: application/x-www-form-urlencoded") == NULL) {
+        send_error_message(client_socket, 415, "Content-Type should be set to application/x-www-form-urlencoded.");
+        return;
+    }
+
+    const char *expected_keys[] = {"password", "vtoken"};
+    bool found_keys[2];
+    memset(found_keys, 0, sizeof(found_keys));
+
+    if (!parse_url_data(body, expected_keys, 2, found_keys) || !found_keys[0] || !found_keys[1]) {
+        try_sending_error_file(client_socket, 405);
+        return;
+    }
+
+    char msg[64];
+    char password[DB_PASSWORD_LEN + 1];
+    char token[MAX_TOKEN_LENGTH + 1];
+    if (!extract_url_param(body, "password", password, DB_PASSWORD_LEN)) {
+        sprintf(msg, "Password cannot be longer than %d characters.", DB_PASSWORD_LEN);
+        send_error_message(client_socket, 400, msg);
+        return;
+    } else if (!is_valid_password(password, msg)) {
+        send_error_message(client_socket, 400, msg);
+        return;
+    } else if (!extract_url_param(body, "vtoken", token, MAX_TOKEN_LENGTH)) {
+        send_error_message(client_socket, 400, "Invalid or expired verification link.");
+        return;
+    }
+
+    bool exists;
+    if (!db_check_reset_password_verification_token(context->db_conn, token, &exists)) {
+        send_error_message(client_socket, 500, "Couldn't check password verification information.");
+        return;
+    } else if (!exists) {
+        send_error_message(client_socket, 400, "Invalid or expired verification link.");
+        return;
+    }
+
+    if (!db_reset_user_password(context->db_conn, token, password)) {
+        send_error_message(client_socket, 500, "Couldn't reset the password.");
+        return;
+    }
+
+    send_headers(client_socket, 204, NULL, NULL);
 }
 
 
