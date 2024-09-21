@@ -12,7 +12,7 @@
 			rel="stylesheet">
 	<link rel="stylesheet" href="/styles/auth_styles.css">
 	<link rel="stylesheet" href="/styles/base.css">
-	<link rel="stylesheet" href="/styles/form-base.css">
+	<link rel="stylesheet" href="/styles/form_base.css">
 </head>
 <body>
 <h1>Authenticate Yourself</h1>
@@ -28,11 +28,11 @@
 	</div>
 </main>
 <div id="popup-form" class="popup-form hidden">
-	<div id="form-container">
+	<div class="form-container">
 		<h2 id="form-title"></h2>
 		<form id="auth-form">
 			<label for="email">E-Mail:</label>
-			<input type="email" id="email" name="email" placeholder="Enter E-Mail" maxlength="128" required>
+			<input type="email" id="email" name="email" placeholder="Enter e-mail" maxlength="128" required>
 
 			<label for="password">Password:</label>
 			<input type="password" id="password" name="password" placeholder="Enter password" maxlength="128" minlength="8"
@@ -43,8 +43,25 @@
 				<input type="password" id="confirm-password" name="confirm-password" placeholder="Enter password">
 			</div>
 
-			<button type="submit" id="submit-btn">Submit</button>
-			<button type="button" id="close-btn">Close</button>
+			<button type="submit" id="submit-btn" class="submit-btn">Submit</button>
+			<button type="button" id="close-btn" class="close-btn">Close</button>
+
+			<p id="forgot-password-p" class="hidden">Forgot password?
+				<button type="button" id="forgot-password-btn">Reset it!</button>
+			</p>
+		</form>
+	</div>
+</div>
+<div id="forgot-password-popup-form" class="popup-form hidden">
+	<div class="form-container">
+		<h2>Reset Your Password</h2>
+		<form id="forgot-password-form">
+			<label for="forgot-password-email">E-Mail:</label>
+			<input id="forgot-password-email" name="forgot-password-email" type="email" placeholder="Enter e-mail"
+						 maxlength="128" required>
+
+			<button type="submit" id="submit-reset-btn" class="submit-btn">Send</button>
+			<button type="button" id="close-reset-btn" class="close-btn">Close</button>
 		</form>
 	</div>
 </div>

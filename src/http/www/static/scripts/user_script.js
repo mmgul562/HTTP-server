@@ -15,6 +15,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (isEmail) {
                     formData.append('email', document.getElementById('email').value);
                 } else {
+                    if (!checkPasswords('password', 'confirm-password')) {
+                        return;
+                    }
                     formData.append('password', document.getElementById('password').value);
                 }
 
@@ -31,7 +34,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         handleResponse(
                             response,
                             isEmail ? `Verification e-mail was sent to provided address.` : `Password updated successfully!`,
-                            false, 4000
+                            false, false,
+                            isEmail ? 4000 : 1200
                         );
                     })
                     .catch(handleError);

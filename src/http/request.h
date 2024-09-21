@@ -28,7 +28,5 @@ RequestParsingStatus parse_http_request(char *buffer, HttpRequest *request);
 
 void free_http_request(HttpRequest *request);
 
-bool extract_url_param(const char *src, const char *key, char *dest, int max_len);
-
 
 #endif

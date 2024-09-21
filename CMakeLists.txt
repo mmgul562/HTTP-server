@@ -26,8 +26,8 @@ add_executable(HTTP_server src/main.c
         src/middlewares/session_middleware.c
         src/middlewares/session_middleware.h
         src/http/util/task.h
-        src/http/route.c
-        src/http/route.h
+        src/http/routing/handlers.c
+        src/http/routing/handlers.h
         src/db/util/query_result.h
         src/db/util/generate_token.c
         src/db/util/generate_token.h
@@ -35,6 +35,11 @@ add_executable(HTTP_server src/main.c
         src/db/verifications.h
         src/db/email_change_requests.c
         src/db/email_change_requests.h
+        src/http/util/db_cleanup.c
+        src/http/util/db_cleanup.h
+        src/http/routing/helpers.c
+        src/http/routing/helpers.h
+        src/http/routing/route.h
 )
 
 target_link_libraries(HTTP_server ${PostgreSQL_LIBRARIES} argon2 OpenSSL::Crypto ${CURL_LIBRARIES})

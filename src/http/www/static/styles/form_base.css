@@ -11,7 +11,7 @@
     z-index: 1000;
 }
 
-#form-container {
+.form-container {
     font-family: "Roboto", sans-serif;
     background-color: #FFFF66;
     border-radius: 1rem;
@@ -22,13 +22,13 @@
     text-align: center;
 }
 
-#form-container h2 {
+.form-container h2 {
     color: #050000;
     font-size: 2.5rem;
     margin: 1rem 0;
 }
 
-#form-container label {
+.form-container label {
     display: block;
     margin: 0.5rem 0;
     font-size: 1.5rem;
@@ -36,7 +36,7 @@
     text-align: left;
 }
 
-#form-container input {
+.form-container input {
     width: calc(100% - 1rem);
     padding: 0.5rem;
     margin-bottom: 1rem;
@@ -45,12 +45,12 @@
     font-size: 1rem;
 }
 
-#form-container input:focus {
+.form-container input:focus {
     outline: 0.15rem solid #eea405;
 }
 
-#submit-btn,
-#confirm-btn {
+.submit-btn,
+.confirm-btn {
     background-color: #32CD32;
     color: #fff;
     padding: 0.5rem 1rem;
@@ -61,13 +61,13 @@
     transition: background-color 0.3s ease;
 }
 
-#submit-btn:hover,
-#confirm-btn:hover {
+.submit-btn:hover,
+.confirm-btn:hover {
     background-color: #228B22;
 }
 
-#close-btn,
-#cancel-btn {
+.close-btn,
+.cancel-btn {
     background-color: #FF6347;
     color: #fff;
     padding: 0.5rem 1rem;
@@ -79,8 +79,8 @@
     transition: background-color 0.3s ease;
 }
 
-#close-btn:hover,
-#cancel-btn:hover {
+.close-btn:hover,
+.cancel-btn:hover {
     background-color: #FF4500;
 }
 

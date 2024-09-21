@@ -4,14 +4,6 @@
 #include <stdlib.h>
 
 
-static char hex_to_char(char c) {
-    if (c >= '0' && c <= '9') return (char)(c - '0');
-    if (c >= 'a' && c <= 'f') return (char)(c - 'a' + 10);
-    if (c >= 'A' && c <= 'F') return (char)(c - 'A' + 10);
-    return -1;
-}
-
-
 static int convert_method_str(const char *method) {
     if (strcmp(method, "GET") == 0) {
         return GET;
@@ -23,54 +15,6 @@ static int convert_method_str(const char *method) {
         return PATCH;
     }
     return -1;
-}
-
-
-static void url_decode(const char *src, size_t src_len, char *dest) {
-    int i, j;
-
-    for (i = 0, j = 0; i < src_len; ++i, ++j) {
-        if (src[i] == '%' && i + 2 < src_len) {
-            char high = hex_to_char(src[i + 1]);
-            char low = hex_to_char(src[i + 2]);
-            if (high >= 0 && low >= 0) {
-                dest[j] = (char)((high << 4) | low);
-                i += 2;
-            } else {
-                dest[j] = src[i];
-            }
-        } else if (src[i] == '+') {
-            dest[j] = ' ';
-        } else {
-            dest[j] = src[i];
-        }
-    }
-    dest[j] = '\0';
-}
-
-
-bool extract_url_param(const char *src, const char *key, char *dest, int max_len) {
-    char search_key[256];
-    snprintf(search_key, sizeof(search_key), "%s=", key);
-
-    char *start = strstr(src, search_key);
-    if (!start) return NULL;
-    start += strlen(search_key);
-
-    char *end = strchr(start, '&');
-    if (!end) end = start + strlen(start);
-
-    size_t len = end - start;
-    if (len > max_len) {
-        sprintf(dest, "");
-        return false;
-    }
-    char encoded[len + 1];
-    strncpy(encoded, start, len);
-    encoded[len] = '\0';
-
-    url_decode(encoded, len, dest);
-    return true;
 }
 
 

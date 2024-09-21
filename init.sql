@@ -53,3 +53,64 @@ CREATE TABLE IF NOT EXISTS todos
         REFERENCES users (id)
         ON DELETE CASCADE
 );
+
+
+CREATE OR REPLACE FUNCTION cleanup_verification_results()
+RETURNS INTEGER AS $$
+DECLARE
+    deleted_count INTEGER;
+BEGIN
+    DELETE FROM verification_results
+    WHERE expires_at < NOW();
+
+    GET DIAGNOSTICS deleted_count = ROW_COUNT;
+    RETURN deleted_count;
+END;
+$$ LANGUAGE plpgsql;
+
+
+CREATE OR REPLACE FUNCTION cleanup_email_change_requests()
+RETURNS INTEGER AS $$
+DECLARE
+    deleted_count INTEGER;
+BEGIN
+    DELETE FROM email_change_requests
+    WHERE token_expires_at < NOW();
+
+    GET DIAGNOSTICS deleted_count = ROW_COUNT;
+    RETURN deleted_count;
+END;
+$$ LANGUAGE plpgsql;
+
+
+CREATE OR REPLACE FUNCTION cleanup_sessions()
+RETURNS INTEGER AS $$
+DECLARE
+    deleted_count INTEGER;
+BEGIN
+    DELETE FROM sessions
+    WHERE expires_at < NOW();
+
+    GET DIAGNOSTICS deleted_count = ROW_COUNT;
+    RETURN deleted_count;
+END;
+$$ LANGUAGE plpgsql;
+
+
+CREATE OR REPLACE FUNCTION cleanup_all()
+RETURNS TABLE (table_name TEXT, deleted_count INTEGER) AS $$
+DECLARE
+    ver_count INTEGER;
+    email_count INTEGER;
+    session_count INTEGER;
+BEGIN
+    ver_count := cleanup_verification_results();
+    email_count := cleanup_email_change_requests();
+    session_count := cleanup_sessions();
+
+    RETURN QUERY VALUES
+        ('verification_results', ver_count),
+        ('email_change_requests', email_count),
+        ('sessions', session_count);
+END;
+$$ LANGUAGE plpgsql;

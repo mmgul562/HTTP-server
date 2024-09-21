@@ -44,7 +44,7 @@ static bool check_email_taken(PGconn *conn, const char *email, bool *taken) {
 }
 
 
-QueryResult db_create_email_change_request(PGconn *conn, int user_id, const char *email) {
+QueryResult db_create_email_change_request(PGconn *conn, int user_id, const char *email, char *token) {
     bool is_taken;
     if (!check_email_taken(conn, email, &is_taken)) {
         return QRESULT_INTERNAL_ERROR;
@@ -52,8 +52,8 @@ QueryResult db_create_email_change_request(PGconn *conn, int user_id, const char
         return QRESULT_UNIQUE_CONSTRAINT_ERROR;
     }
 
-    char token[SESSION_TOKEN_LENGTH * 2 + 1];
-    if (!generate_token(token)) {
+    char verification_token[SESSION_TOKEN_LENGTH * 2 + 1];
+    if (!generate_token(verification_token)) {
         fprintf(stderr, "Error generating verification token\n");
         return QRESULT_INTERNAL_ERROR;
     }
@@ -65,8 +65,8 @@ QueryResult db_create_email_change_request(PGconn *conn, int user_id, const char
 
     const char *query = "INSERT INTO email_change_requests(user_id, new_email, verification_token, token_expires_at) "
                         "VALUES ($1, $2, $3, to_timestamp($4))";
-    const char *params[4] = {user_id_str, email, token, expiry_str};
-    int param_lengths[4] = {strlen(user_id_str), strlen(email), strlen(token), strlen(expiry_str)};
+    const char *params[4] = {user_id_str, email, verification_token, expiry_str};
+    int param_lengths[4] = {strlen(user_id_str), strlen(email), strlen(verification_token), strlen(expiry_str)};
     int param_formats[4] = {0, 0, 0, 0};
 
     PGresult *res = PQexecParams(conn, query, 4, NULL, params, param_lengths, param_formats, 0);
@@ -84,6 +84,7 @@ QueryResult db_create_email_change_request(PGconn *conn, int user_id, const char
         PQclear(res);
         return QRESULT_NONE_AFFECTED;
     }
+    strcpy(token, verification_token);
     PQclear(res);
     return QRESULT_OK;
 }

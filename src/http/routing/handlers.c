@@ -1,19 +1,16 @@
-#include "route.h"
-#include "../db/todos.h"
-#include "../db/users.h"
-#include "../db/email_change_requests.h"
-#include "../db/sessions.h"
-#include "../db/verifications.h"
-#include "../middlewares/session_middleware.h"
+#include "handlers.h"
+#include "helpers.h"
+#include "../../db/todos.h"
+#include "../../db/users.h"
+#include "../../db/email_change_requests.h"
+#include "../../db/sessions.h"
+#include "../../db/verifications.h"
+#include "../../middlewares/session_middleware.h"
 #include <string.h>
 #include <stdlib.h>
-#include <ctype.h>
 #include <arpa/inet.h>
-#include <curl/curl.h>
 
-#define MAX_PATH_LENGTH 304
-#define DOCUMENT_ROOT "../src/http/www"
-#define MAX_TEMPLATE_SIZE 8192
+#define SERVER_DOMAIN "http://localhost:8080"
 #define PAGE_SIZE 8
 #define MAX_TODOS_HTML_SIZE 20240
 #define MAX_COOKIE_SIZE 256
@@ -56,28 +53,27 @@ static void update_user(HttpRequest *req, Task *context);
 static void delete_user(HttpRequest *req, Task *context);
 
 static const Route ROUTES[] = {
-        {"/", GET, get_home},
-        {"/about", GET, get_about},
-        {"/todo", POST, create_todo},
-        {"/todo/", PATCH, update_todo},
-        {"/todo/", DELETE, delete_todo},
-        {"/user/verify", POST, verify_email},
-        {"/user/verify", GET, get_verification_page},
-        {"/user/verify", PATCH, verify_new_email},
-        {"/user/forgot-password", POST, forgot_password},
-        {"/user/reset-password", GET, get_reset_password_page},
-        {"/user/reset-password", POST, reset_password},
-        {"/user", GET, get_user_page},
-        {"/user/signup", POST, signup_user},
-        {"/user/login", POST, login_user},
-        {"/user/logout", POST, logout_user},
-        {"/user", PATCH, update_user},
-        {"/user", DELETE, delete_user}
+        {"/",                     GET,    get_home},
+        {"/about",                GET,    get_about},
+        {"/todo",                 POST,   create_todo},
+        {"/todo/",                PATCH,  update_todo},
+        {"/todo/",                DELETE, delete_todo},
+        {"/user/verify",          POST,   verify_email},
+        {"/user/verify",          GET,    get_verification_page},
+        {"/user/verify-new",      POST,   verify_new_email},
+        {"/user/forgot-password", POST,   forgot_password},
+        {"/user/reset-password",  GET,    get_reset_password_page},
+        {"/user/reset-password",  POST,   reset_password},
+        {"/user",                 GET,    get_user_page},
+        {"/user/signup",          POST,   signup_user},
+        {"/user/login",           POST,   login_user},
+        {"/user/logout",          POST,   logout_user},
+        {"/user",                 PATCH,  update_user},
+        {"/user",                 DELETE, delete_user}
 };
 
 static const int ROUTES_COUNT = sizeof(ROUTES) / sizeof(Route);
 
-// HELPERS
 
 static const Route *check_route(const char *url, Method method) {
     if (method == DELETE || method == PATCH) {
@@ -98,157 +94,6 @@ static const Route *check_route(const char *url, Method method) {
     return NULL;
 }
 
-
-static void skip_placeholder(char *buffer, const char *placeholder, char **remainder) {
-    char *placeholder_pos = strstr(buffer, placeholder);
-    if (placeholder_pos) {
-        *placeholder_pos = '\0';
-        *remainder = placeholder_pos + strlen(placeholder);
-    } else {
-        *remainder = buffer + strlen(buffer);
-    }
-}
-
-
-static char *read_template(const char *filename, const char *placeholder, char **remainder) {
-    FILE *file = fopen(filename, "r");
-    if (file == NULL) {
-        perror("Error opening template file");
-        return NULL;
-    }
-
-    char *buffer = malloc(MAX_TEMPLATE_SIZE);
-    size_t bytesRead = fread(buffer, 1, MAX_TEMPLATE_SIZE - 1, file);
-    buffer[bytesRead] = '\0';
-
-    fclose(file);
-
-    skip_placeholder(buffer, placeholder, remainder);
-
-    return buffer;
-}
-
-
-static bool parse_url_data(const char *body, const char **expected_keys, int n_expected_keys, bool *found_keys) {
-    if (!body) return false;
-
-    char *body_copy = strdup(body);
-    char *token, *rest = body_copy;
-    while ((token = strtok_r(rest, "&", &rest))) {
-        char *key = strtok(token, "=");
-        char *value = strtok(NULL, "=");
-
-        if (key && value) {
-            bool is_expected = false;
-            for (int i = 0; i < n_expected_keys; ++i) {
-                if (strcmp(key, expected_keys[i]) == 0) {
-                    found_keys[i] = true;
-                    is_expected = true;
-                    break;
-                }
-            }
-            if (!is_expected) {
-                free(body_copy);
-                return false;
-            }
-        }
-    }
-    free(body_copy);
-    return true;
-}
-
-
-static int is_path_safe(const char *path) {
-    char resolved_path[MAX_PATH_LENGTH];
-    char resolved_root[MAX_PATH_LENGTH];
-
-    if (realpath(path, resolved_path) == NULL) {
-        return 0;
-    }
-    if (realpath(DOCUMENT_ROOT, resolved_root) == NULL) {
-        perror("Invalid DOCUMENT_ROOT");
-        return 0;
-    }
-
-    return (strncmp(resolved_path, resolved_root, strlen(resolved_root)) == 0);
-}
-
-
-static bool validate_url_id(const char *url_id, int *id) {
-    size_t url_len = strlen(url_id);
-    for (int i = 0; i < url_len; ++i) {
-        if (!isdigit(*(url_id + i))) {
-            return false;
-        }
-    }
-
-    *id = atoi(url_id);
-    if (*id < 0 || (*id == 0 && strcmp(url_id, "0") != 0)) {
-        return false;
-    }
-    return true;
-}
-
-
-static bool is_valid_email(const char *email) {
-    int atSymbolIndex = -1;
-    int dotSymbolIndex = -1;
-    size_t length = strlen(email);
-    if (length > DB_EMAIL_LEN) {
-        return false;
-    }
-
-    for (int i = 0; i < length; i++) {
-        if (email[i] == '@') {
-            if (atSymbolIndex != -1) {
-                return false;
-            }
-            atSymbolIndex = i;
-        } else if (email[i] == '.' && atSymbolIndex != -1) {
-            dotSymbolIndex = i;
-        }
-    }
-    if (atSymbolIndex > 0 && dotSymbolIndex > atSymbolIndex + 1 && dotSymbolIndex < length - 1) {
-        return true;
-    }
-    return false;
-}
-
-
-static bool is_valid_password(const char *password, char *msg) {
-    size_t length = strlen(password);
-    if (length < 8) {
-        sprintf(msg, "Password must be at least 8 characters long.");
-        return false;
-    } else if (length > DB_PASSWORD_LEN) {
-        sprintf(msg, "Password cannot be longer than %d characters.", DB_PASSWORD_LEN);
-        return false;
-    }
-
-    bool hasChar = false;
-    bool hasDigit = false;
-    bool hasSpecial = false;
-
-    for (int i = 0; i < length; i++) {
-        if (isalpha(password[i])) {
-            hasChar = true;
-        } else if (isdigit(password[i])) {
-            hasDigit = true;
-        } else if (ispunct(password[i])) {
-            hasSpecial = true;
-        }
-    }
-    if (!hasChar) {
-        sprintf(msg, "Password must have at least 1 letter.");
-        return false;
-    } else if (!(hasDigit || hasSpecial)) {
-        sprintf(msg, "Password must have at least 1 number/special character.");
-        return false;
-    }
-    return true;
-}
-
-// HANDLERS
 
 static void get_authentication_page(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
@@ -420,10 +265,9 @@ static void create_todo(HttpRequest *req, Task *context) {
         send_error_message(client_socket, 500, "Couldn't retrieve session information.");
         return;
     }
-    const char *headers = req->headers;
     const char *body = req->body;
 
-    if (strstr(headers, "\r\nContent-Type: application/x-www-form-urlencoded\r\n") == NULL) {
+    if (strstr(req->headers, "\r\nContent-Type: application/x-www-form-urlencoded\r\n") == NULL) {
         send_error_message(client_socket, 415, "Content-Type should be set to application/x-www-form-urlencoded.");
         return;
     } else if (!check_csrf_token(req, csrf_token)) {
@@ -490,10 +334,9 @@ static void update_todo(HttpRequest *req, Task *context) {
         send_error_message(client_socket, 500, "Couldn't retrieve session information.");
         return;
     }
-    const char *headers = req->headers;
     const char *body = req->body;
 
-    if (strstr(headers, "\r\nContent-Type: application/x-www-form-urlencoded\r\n") == NULL) {
+    if (strstr(req->headers, "\r\nContent-Type: application/x-www-form-urlencoded\r\n") == NULL) {
         send_error_message(client_socket, 415, "Content-Type should be set to application/x-www-form-urlencoded.");
         return;
     } else if (!check_csrf_token(req, csrf_token)) {
@@ -661,20 +504,27 @@ static void get_user_page(HttpRequest *req, Task *context) {
 
 static void verify_email(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
+    const char *body = req->body;
+
+    if (strstr(req->headers, "Content-Type: application/x-www-form-urlencoded") == NULL) {
+        send_error_message(client_socket, 415, "Content-Type should be set to application/x-www-form-urlencoded.");
+        return;
+    }
+
     const char *expected_keys[2] = {"email", "vtoken"};
     bool found_keys[2];
     memset(found_keys, 0, sizeof(found_keys));
     VerificationResult result = {0};
 
-    if (!parse_url_data(req->query_string, expected_keys, 2, found_keys) || !found_keys[0] || !found_keys[1]) {
+    if (!parse_url_data(body, expected_keys, 2, found_keys) || !found_keys[0] || !found_keys[1]) {
         try_sending_error_file(client_socket, 405);
         return;
     }
 
     char email[DB_EMAIL_LEN + 1];
     char provided_token[MAX_TOKEN_LENGTH + 1];
-    extract_url_param(req->query_string, "email", email, DB_EMAIL_LEN);
-    extract_url_param(req->query_string, "vtoken", provided_token, MAX_TOKEN_LENGTH);
+    extract_url_param(body, "email", email, DB_EMAIL_LEN);
+    extract_url_param(body, "vtoken", provided_token, MAX_TOKEN_LENGTH);
 
     bool is_verified;
     char expected_token[MAX_TOKEN_LENGTH + 1];
@@ -687,16 +537,14 @@ static void verify_email(HttpRequest *req, Task *context) {
         return;
     }
 
+    result.token = provided_token;
     if (strcmp(provided_token, expected_token) != 0) {
-        result.token = provided_token;
         result.message = "Invalid or expired verification link.";
         result.success = false;
     } else if (!db_verify_email(context->db_conn, email)) {
-        result.token = provided_token;
         result.message = "Couldn't verify the e-mail.";
         result.success = false;
     } else {
-        result.token = provided_token;
         result.message = "You can now sign in.";
         result.success = true;
     }
@@ -776,20 +624,27 @@ static void get_verification_page(HttpRequest *req, Task *context) {
 
 static void verify_new_email(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
+    const char *body = req->body;
+
+    if (strstr(req->headers, "Content-Type: application/x-www-form-urlencoded") == NULL) {
+        send_error_message(client_socket, 415, "Content-Type should be set to application/x-www-form-urlencoded.");
+        return;
+    }
+
     const char *expected_keys[2] = {"email", "vtoken"};
     bool found_keys[2];
     memset(found_keys, 0, sizeof(found_keys));
     VerificationResult result = {0};
 
-    if (!parse_url_data(req->query_string, expected_keys, 2, found_keys) || !found_keys[0] || !found_keys[1]) {
+    if (!parse_url_data(body, expected_keys, 2, found_keys) || !found_keys[0] || !found_keys[1]) {
         try_sending_error_file(client_socket, 405);
         return;
     }
 
     char email[DB_EMAIL_LEN + 1];
     char provided_token[MAX_TOKEN_LENGTH + 1];
-    extract_url_param(req->query_string, "email", email, DB_EMAIL_LEN);
-    extract_url_param(req->query_string, "vtoken", provided_token, MAX_TOKEN_LENGTH);
+    extract_url_param(body, "email", email, DB_EMAIL_LEN);
+    extract_url_param(body, "vtoken", provided_token, MAX_TOKEN_LENGTH);
 
     int user_id;
     char expected_token[MAX_TOKEN_LENGTH + 1];
@@ -845,10 +700,8 @@ static void verify_new_email(HttpRequest *req, Task *context) {
 
 static void forgot_password(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
-    const char *headers = req->headers;
-    const char *body = req->body;
 
-    if (strstr(headers, "Content-Type: application/x-www-form-urlencoded") == NULL) {
+    if (strstr(req->headers, "Content-Type: application/x-www-form-urlencoded") == NULL) {
         send_error_message(client_socket, 415, "Content-Type should be set to application/x-www-form-urlencoded.");
         return;
     }
@@ -857,18 +710,19 @@ static void forgot_password(HttpRequest *req, Task *context) {
     bool found_keys[1];
     memset(found_keys, 0, sizeof(found_keys));
 
-    if (!parse_url_data(body, expected_keys, 1, found_keys) || !found_keys[0]) {
+    if (!parse_url_data(req->body, expected_keys, 1, found_keys) || !found_keys[0]) {
         try_sending_error_file(client_socket, 405);
         return;
     }
 
     char email[DB_EMAIL_LEN + 1];
-    if (!extract_url_param(body, "email", email, DB_EMAIL_LEN)) {
+    if (!extract_url_param(req->body, "email", email, DB_EMAIL_LEN)) {
         send_error_message(client_socket, 401, "Invalid e-mail.");
         return;
     }
 
-    QueryResult qres = db_set_verification_token(context->db_conn, email);
+    char token[MAX_TOKEN_LENGTH + 1];
+    QueryResult qres = db_set_verification_token(context->db_conn, email, token);
     if (qres == QRESULT_INTERNAL_ERROR) {
         send_error_message(client_socket, 500, "Couldn't create password-reset link.");
         return;
@@ -877,7 +731,17 @@ static void forgot_password(HttpRequest *req, Task *context) {
         return;
     }
 
-    // should send an email here
+    const char *reset_filepath = DOCUMENT_ROOT"/mails/password_reset.html";
+    char reset_link[256 + MAX_TOKEN_LENGTH];
+    snprintf(reset_link, sizeof(reset_link),
+             "<a href=\"%s/user/reset-password?v=%s\">Click Here</a>",
+             SERVER_DOMAIN, token);
+
+    if (!send_email(email, "Reset Your password", reset_filepath, "<!-- RESET_LINK -->", reset_link)) {
+        send_error_message(client_socket, 500, "Couldn't send an e-mail for resetting password.");
+        return;
+    }
+
     send_headers(client_socket, 204, NULL, NULL);
 }
 
@@ -906,16 +770,33 @@ static void get_reset_password_page(HttpRequest *req, Task *context) {
     }
 
     const char *reset_pswd_path = DOCUMENT_ROOT"/reset_password_page.html";
-    try_sending_file(client_socket, reset_pswd_path);
+    char *remainder;
+    char *reset_html = read_template(reset_pswd_path, "<!-- V_TOKEN -->", &remainder);
+
+    char token_html[256 + MAX_TOKEN_LENGTH];
+    snprintf(token_html, sizeof(token_html), "<input type=\"hidden\" name=\"vtoken\" value=\"%s\">", token);
+
+    size_t reset_len = strlen(reset_html);
+    size_t token_len = strlen(token_html);
+    size_t remainder_len = strlen(remainder);
+    size_t total_len = reset_len + token_len + remainder_len;
+    char content_length[total_len + 1];
+    snprintf(content_length, sizeof(content_length), "Content-Length: %ld\r\n", total_len);
+
+    send_headers(client_socket, 200, "text/html", content_length);
+    send(client_socket, reset_html, reset_len, 0);
+    send(client_socket, token_html, token_len, 0);
+    send(client_socket, remainder, remainder_len, 0);
+
+    free(reset_html);
 }
 
 
 static void reset_password(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
-    const char *headers = req->headers;
     const char *body = req->body;
 
-    if (strstr(headers, "Content-Type: application/x-www-form-urlencoded") == NULL) {
+    if (strstr(req->headers, "Content-Type: application/x-www-form-urlencoded") == NULL) {
         send_error_message(client_socket, 415, "Content-Type should be set to application/x-www-form-urlencoded.");
         return;
     }
@@ -949,7 +830,7 @@ static void reset_password(HttpRequest *req, Task *context) {
         send_error_message(client_socket, 500, "Couldn't check password verification information.");
         return;
     } else if (!exists) {
-        send_error_message(client_socket, 400, "Invalid or expired verification link.");
+        send_error_message(client_socket, 400, "Invalid or expired link.");
         return;
     }
 
@@ -958,16 +839,16 @@ static void reset_password(HttpRequest *req, Task *context) {
         return;
     }
 
-    send_headers(client_socket, 204, NULL, NULL);
+    const char *location = "Location: /user\r\n";
+    send_headers(client_socket, 303, NULL, location);
 }
 
 
 static void signup_user(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
-    const char *headers = req->headers;
     const char *body = req->body;
 
-    if (strstr(headers, "Content-Type: application/x-www-form-urlencoded") == NULL) {
+    if (strstr(req->headers, "Content-Type: application/x-www-form-urlencoded") == NULL) {
         send_error_message(client_socket, 415, "Content-Type should be set to application/x-www-form-urlencoded.");
         return;
     }
@@ -1002,13 +883,28 @@ static void signup_user(HttpRequest *req, Task *context) {
     }
 
     User user = {.email = email, .password = password};
+    char verification_token[MAX_TOKEN_LENGTH + 1];
 
-    QueryResult qres = db_signup_user(context->db_conn, &user);
+    QueryResult qres = db_signup_user(context->db_conn, &user, verification_token);
     if (qres == QRESULT_INTERNAL_ERROR) {
         send_error_message(client_socket, 500, "Couldn't sign up the user.");
     } else if (qres == QRESULT_UNIQUE_CONSTRAINT_ERROR) {
         send_error_message(client_socket, 409, "E-Mail already taken.");
     } else {
+        const char *verify_filepath = DOCUMENT_ROOT"/mails/email_verification.html";
+        char verification_form[512 + MAX_TOKEN_LENGTH];
+        snprintf(verification_form, sizeof(verification_form),
+                 "<form action=\"%s/user/verify\" method=\"POST\" enctype=\"application/x-www-form-urlencoded\">"
+                 "<input type=\"hidden\" name=\"email\" value=\"%s\">"
+                 "<input type=\"hidden\" name=\"vtoken\" value=\"%s\">"
+                 "<button type=\"submit\">Click Here</button>"
+                 "</form>",
+                 SERVER_DOMAIN, email, verification_token);
+
+        if (!send_email(email, "Verify Your To-Do account", verify_filepath, "<!-- VER_FORM -->", verification_form)) {
+            send_error_message(client_socket, 500, "Couldn't send a verification e-mail.");
+            return;
+        }
         const char *location = "Location: /user\r\n";
         send_headers(client_socket, 201, NULL, location);
     }
@@ -1017,10 +913,9 @@ static void signup_user(HttpRequest *req, Task *context) {
 
 static void login_user(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
-    const char *headers = req->headers;
     const char *body = req->body;
 
-    if (strstr(headers, "Content-Type: application/x-www-form-urlencoded") == NULL) {
+    if (strstr(req->headers, "Content-Type: application/x-www-form-urlencoded") == NULL) {
         send_error_message(client_socket, 415, "Content-Type should be set to application/x-www-form-urlencoded.");
         return;
     }
@@ -1123,10 +1018,9 @@ void update_user(HttpRequest *req, Task *context) {
         send_error_message(client_socket, 500, "Couldn't retrieve session information.");
         return;
     }
-    const char *headers = req->headers;
     const char *body = req->body;
 
-    if (strstr(headers, "Content-Type: application/x-www-form-urlencoded") == NULL) {
+    if (strstr(req->headers, "Content-Type: application/x-www-form-urlencoded") == NULL) {
         send_error_message(client_socket, 415, "Content-Type should be set to application/x-www-form-urlencoded.");
         return;
     } else if (!check_csrf_token(req, csrf_token)) {
@@ -1158,12 +1052,28 @@ void update_user(HttpRequest *req, Task *context) {
             send_error_message(client_socket, 400, "Invalid e-mail.");
             return;
         }
-        qres = db_create_email_change_request(context->db_conn, user_id, email);
+        char verification_token[MAX_TOKEN_LENGTH + 1];
+        qres = db_create_email_change_request(context->db_conn, user_id, email, verification_token);
         if (qres == QRESULT_INTERNAL_ERROR || qres == QRESULT_NONE_AFFECTED) {
             send_error_message(client_socket, 500, "Couldn't update the e-mail.");
             return;
         } else if (qres == QRESULT_UNIQUE_CONSTRAINT_ERROR) {
             send_error_message(client_socket, 409, "E-Mail already taken.");
+            return;
+        }
+        const char *verify_filepath = DOCUMENT_ROOT"/mails/email_verification.html";
+        char verification_form[512 + MAX_TOKEN_LENGTH];
+        snprintf(verification_form, sizeof(verification_form),
+                 "<form action=\"%s/user/verify-new\" method=\"POST\" enctype=\"application/x-www-form-urlencoded\">"
+                 "<input type=\"hidden\" name=\"email\" value=\"%s\">"
+                 "<input type=\"hidden\" name=\"vtoken\" value=\"%s\">"
+                 "<button type=\"submit\">Click Here</button>"
+                 "</form>",
+                 SERVER_DOMAIN, email, verification_token);
+
+        if (!send_email(email, "Verify Your new To-Do e-mail", verify_filepath, "<!-- VER_FORM -->",
+                        verification_form)) {
+            send_error_message(client_socket, 500, "Couldn't send a verification e-mail.");
             return;
         }
     } else if (found_keys[1]) {

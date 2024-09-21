@@ -1,5 +1,6 @@
 #include "server.h"
-#include "route.h"
+#include "routing/handlers.h"
+#include "util/db_cleanup.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -212,6 +213,9 @@ int server_init(Server *server, int port, int thread_pool_size) {
     if (!server->db_conn) {
         return -1;
     }
+
+    cleanup_database(server->db_conn);
+
     server->server_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (server->server_socket == -1) {
         perror("Socket creation failed");

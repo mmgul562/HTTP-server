@@ -64,7 +64,7 @@ QueryResult db_get_verification_token(PGconn *conn, const char *email, char *tok
 }
 
 
-QueryResult db_set_verification_token(PGconn *conn, const char *email) {
+QueryResult db_set_verification_token(PGconn *conn, const char *email, char *token) {
     char verification_token[SESSION_TOKEN_LENGTH * 2 + 1];
     if (!generate_token(verification_token)) {
         fprintf(stderr, "Error generating verification token\n");
@@ -90,6 +90,7 @@ QueryResult db_set_verification_token(PGconn *conn, const char *email) {
         PQclear(res);
         return QRESULT_NONE_AFFECTED;
     }
+    strcpy(token, verification_token);
     PQclear(res);
     return QRESULT_OK;
 }
@@ -185,7 +186,7 @@ static bool update_unverified_user(PGconn *conn, const char *email, const char *
 }
 
 
-QueryResult db_signup_user(PGconn *conn, User *user) {
+QueryResult db_signup_user(PGconn *conn, User *user, char *token) {
     uint8_t salt[SALT_LEN];
     char encoded[ENCODED_LEN];
 
@@ -236,6 +237,7 @@ QueryResult db_signup_user(PGconn *conn, User *user) {
                 if (!update_unverified_user(conn, user->email, encoded, verification_token, expiry_str)) {
                     return QRESULT_INTERNAL_ERROR;
                 }
+                strcpy(token, verification_token);
                 return QRESULT_OK;
             }
         }
@@ -243,6 +245,7 @@ QueryResult db_signup_user(PGconn *conn, User *user) {
         PQclear(res);
         return QRESULT_INTERNAL_ERROR;
     }
+    strcpy(token, verification_token);
     PQclear(res);
     return QRESULT_OK;
 }
@@ -404,7 +407,7 @@ bool db_reset_user_password(PGconn *conn, const char *vtoken, const char *passwo
         return false;
     }
 
-    const char *query = "UPDATE users SET password = $1 WHERE verification_token = $2";
+    const char *query = "UPDATE users SET password = $1, verification_token = NULL, token_expires_at = NULL WHERE verification_token = $2";
     const char *params[2] = {encoded, vtoken};
     int param_lengths[2] = {strlen(encoded), strlen(vtoken)};
     int param_formats[2] = {0, 0};
@@ -413,6 +416,7 @@ bool db_reset_user_password(PGconn *conn, const char *vtoken, const char *passwo
 
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
         fprintf(stderr, "User password reset failed: %s", PQerrorMessage(conn));
+        PQclear(res);
         return false;
     }
     if (PQcmdTuples(res) == 0) {
@@ -458,6 +462,7 @@ bool db_update_user_password(PGconn *conn, int id, const char *password) {
 
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
         fprintf(stderr, "User password update failed: %s", PQerrorMessage(conn));
+        PQclear(res);
         return false;
     }
     if (PQcmdTuples(res) == 0) {

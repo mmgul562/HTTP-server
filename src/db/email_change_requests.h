@@ -5,7 +5,7 @@
 #include <libpq-fe.h>
 
 
-QueryResult db_create_email_change_request(PGconn *conn, int user_id, const char *email);
+QueryResult db_create_email_change_request(PGconn *conn, int user_id, const char *email, char *token);
 
 QueryResult db_get_new_verification_token(PGconn *conn, const char *email, int *user_id, char *token);
 

@@ -6,7 +6,22 @@ const hidePopup = (popupId) => {
     document.getElementById(popupId).classList.add('hidden');
 };
 
-const handleResponse = (response, successMessage, redirect = false, timeout = 1200) => {
+const checkPasswords = (passwordId1, passwordId2) => {
+    const password = document.getElementById(passwordId1).value;
+    const confirmPassword = document.getElementById(passwordId2).value;
+
+    if (password !== confirmPassword) {
+        document.getElementById('failure-popup').innerHTML = '<p>Passwords do not match.</p>';
+        showPopup('failure-popup');
+        setTimeout(() => {
+            hidePopup('failure-popup');
+        }, 4000);
+        return false;
+    }
+    return true;
+}
+
+const handleResponse = (response, successMessage, redirect = false, reload = true, timeout = 1200) => {
     if (response.ok || (redirect && response.redirected)) {
         const popupId = 'success-popup';
         document.getElementById(popupId).innerHTML = `<p>${successMessage}</p>`;
@@ -20,7 +35,9 @@ const handleResponse = (response, successMessage, redirect = false, timeout = 12
         } else {
             setTimeout(() => {
                 hidePopup(popupId);
-                location.reload();
+                if (reload) {
+                    location.reload();
+                }
             }, timeout);
         }
     } else {

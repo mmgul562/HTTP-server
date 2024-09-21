@@ -4,8 +4,12 @@ h2 {
     margin: 1rem 0;
 }
 
-#sign-up-btn,
-#sign-in-btn {
+p {
+    font-size: 1.5rem;
+    margin: 1rem auto;
+}
+
+button {
     background-color: #3275cd;
     color: #fff;
     padding: 0.5rem 1rem;
@@ -17,20 +21,7 @@ h2 {
     transition: all 0.2s ease;
 }
 
-#sign-up-btn:hover,
-#sign-in-btn:hover {
+button:hover {
     transform: scale(1.1);
     background-color: #2564b2;
-}
-
-#forgot-password-p {
-    margin-top: 1rem;
-}
-
-#forgot-password-btn {
-    background-color: transparent;
-    border: none;
-    text-decoration: underline;
-    font-size: 1rem;
-    cursor: pointer;
 }
