@@ -17,7 +17,7 @@ typedef struct {
     char *due_time;
 } Todo;
 
-int db_get_total_todos_count(PGconn *conn);
+int db_get_total_todos_count(PGconn *conn, int user_id);
 
 Todo *db_get_all_todos(PGconn *conn, int user_id, int *count, int page, int page_size);
 

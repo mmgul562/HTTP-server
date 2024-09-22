@@ -55,6 +55,22 @@ CREATE TABLE IF NOT EXISTS todos
 );
 
 
+CREATE OR REPLACE FUNCTION cleanup_expired_user_tokens()
+RETURNS INTEGER AS $$
+DECLARE
+    updated_count INTEGER;
+BEGIN
+    UPDATE users
+    SET verification_token = NULL,
+        token_expires_at = NULL
+    WHERE token_expires_at < NOW();
+
+    GET DIAGNOSTICS updated_count = ROW_COUNT;
+    RETURN updated_count;
+END;
+$$ LANGUAGE plpgsql;
+
+
 CREATE OR REPLACE FUNCTION cleanup_verification_results()
 RETURNS INTEGER AS $$
 DECLARE
@@ -98,19 +114,21 @@ $$ LANGUAGE plpgsql;
 
 
 CREATE OR REPLACE FUNCTION cleanup_all()
-RETURNS TABLE (table_name TEXT, deleted_count INTEGER) AS $$
+RETURNS TABLE (table_name TEXT, deleted_or_updated_count INTEGER) AS $$
 DECLARE
     ver_count INTEGER;
     email_count INTEGER;
     session_count INTEGER;
+    user_token_count INTEGER;
 BEGIN
     ver_count := cleanup_verification_results();
     email_count := cleanup_email_change_requests();
     session_count := cleanup_sessions();
-
+    user_token_count := cleanup_expired_user_tokens();
     RETURN QUERY VALUES
         ('verification_results', ver_count),
         ('email_change_requests', email_count),
-        ('sessions', session_count);
+        ('sessions', session_count),
+        ('users (expired tokens)', user_token_count);
 END;
 $$ LANGUAGE plpgsql;

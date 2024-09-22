@@ -4,8 +4,9 @@
 #include <string.h>
 
 
-int db_get_total_todos_count(PGconn *conn) {
-    const char *query = "SELECT COUNT(*) FROM todos";
+int db_get_total_todos_count(PGconn *conn, int user_id) {
+    char query[256];
+    snprintf(query, sizeof(query), "SELECT COUNT(*) FROM todos WHERE user_id = %d", user_id);
 
     PGresult *res = PQexec(conn, query);
 
@@ -14,12 +15,13 @@ int db_get_total_todos_count(PGconn *conn) {
         PQclear(res);
         return -1;
     }
-    if (PQcmdTuples(res) == 0) {
+    if (PQntuples(res) == 0) {
         PQclear(res);
-        return QRESULT_NONE_AFFECTED;
+        return -1;
     }
+    int count = atoi(PQgetvalue(res, 0, 0));
     PQclear(res);
-    return QRESULT_OK;
+    return count;
 }
 
 

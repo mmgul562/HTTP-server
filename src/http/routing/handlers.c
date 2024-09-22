@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <arpa/inet.h>
 
+#define SEND_EMAILS false
 #define SERVER_DOMAIN "http://localhost:8080"
 #define PAGE_SIZE 8
 #define MAX_TODOS_HTML_SIZE 20240
@@ -128,17 +129,18 @@ static void get_about(HttpRequest *req, Task *context) {
 
 static void get_todo_page(HttpRequest *req, Task *context, int user_id, const char *csrf_token) {
     int client_socket = context->client_socket;
+    const char *query_string = req->query_string;
     int page = 1;
 
-    if (req->query_string) {
+    if (query_string) {
         const char *expected_keys[] = {"page"};
         bool found_keys[1] = {0};
-        if (!parse_url_data(req->query_string, expected_keys, 1, found_keys)) {
+        if (!parse_url_data(query_string, expected_keys, 1, found_keys)) {
             try_sending_error_file(client_socket, 400);
             return;
         }
         char page_str[12];
-        if (!extract_url_param(req->query_string, "page", page_str, sizeof(page_str) - 1)) {
+        if (!extract_url_param(query_string, "page", page_str, sizeof(page_str) - 1)) {
             try_sending_error_file(client_socket, 404);
             return;
         }
@@ -154,7 +156,7 @@ static void get_todo_page(HttpRequest *req, Task *context, int user_id, const ch
         return;
     }
 
-    int total_count = db_get_total_todos_count(context->db_conn);
+    int total_count = db_get_total_todos_count(context->db_conn, user_id);
     int total_pages = 1;
     if (total_count > 0) {
         total_pages = (total_count + PAGE_SIZE - 1) / PAGE_SIZE;
@@ -561,17 +563,18 @@ static void verify_email(HttpRequest *req, Task *context) {
 
 static void get_verification_page(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
+    const char *query_string = req->query_string;
     const char *expected_keys[] = {"v"};
     bool found_keys[1];
     memset(found_keys, 0, sizeof(found_keys));
 
-    if (!parse_url_data(req->query_string, expected_keys, 1, found_keys) || !found_keys[0]) {
+    if (!parse_url_data(query_string, expected_keys, 1, found_keys) || !found_keys[0]) {
         try_sending_error_file(client_socket, 404);
         return;
     }
 
     char token[MAX_TOKEN_LENGTH + 1];
-    extract_url_param(req->query_string, "v", token, MAX_TOKEN_LENGTH);
+    extract_url_param(query_string, "v", token, MAX_TOKEN_LENGTH);
     VerificationResult result = {.token = token};
 
     char *remainder;
@@ -731,15 +734,17 @@ static void forgot_password(HttpRequest *req, Task *context) {
         return;
     }
 
-    const char *reset_filepath = DOCUMENT_ROOT"/mails/password_reset.html";
-    char reset_link[256 + MAX_TOKEN_LENGTH];
-    snprintf(reset_link, sizeof(reset_link),
-             "<a href=\"%s/user/reset-password?v=%s\">Click Here</a>",
-             SERVER_DOMAIN, token);
+    if (SEND_EMAILS) {
+        const char *reset_filepath = DOCUMENT_ROOT"/mails/password_reset.html";
+        char reset_link[256 + MAX_TOKEN_LENGTH];
+        snprintf(reset_link, sizeof(reset_link),
+                 "<a href=\"%s/user/reset-password?v=%s\">Click Here</a>",
+                 SERVER_DOMAIN, token);
 
-    if (!send_email(email, "Reset Your password", reset_filepath, "<!-- RESET_LINK -->", reset_link)) {
-        send_error_message(client_socket, 500, "Couldn't send an e-mail for resetting password.");
-        return;
+        if (!send_email(email, "Reset Your password", reset_filepath, "<!-- RESET_LINK -->", reset_link)) {
+            send_error_message(client_socket, 500, "Couldn't send an e-mail for resetting password.");
+            return;
+        }
     }
 
     send_headers(client_socket, 204, NULL, NULL);
@@ -748,17 +753,18 @@ static void forgot_password(HttpRequest *req, Task *context) {
 
 static void get_reset_password_page(HttpRequest *req, Task *context) {
     int client_socket = context->client_socket;
+    const char *query_string = req->query_string;
     const char *expected_keys[] = {"v"};
     bool found_keys[1];
     memset(found_keys, 0, sizeof(found_keys));
 
-    if (!parse_url_data(req->query_string, expected_keys, 1, found_keys) || !found_keys[0]) {
+    if (!parse_url_data(query_string, expected_keys, 1, found_keys) || !found_keys[0]) {
         try_sending_error_file(client_socket, 404);
         return;
     }
 
     char token[MAX_TOKEN_LENGTH + 1];
-    extract_url_param(req->query_string, "v", token, MAX_TOKEN_LENGTH);
+    extract_url_param(query_string, "v", token, MAX_TOKEN_LENGTH);
 
     bool exists;
     if (!db_check_reset_password_verification_token(context->db_conn, token, &exists)) {
@@ -888,9 +894,13 @@ static void signup_user(HttpRequest *req, Task *context) {
     QueryResult qres = db_signup_user(context->db_conn, &user, verification_token);
     if (qres == QRESULT_INTERNAL_ERROR) {
         send_error_message(client_socket, 500, "Couldn't sign up the user.");
+        return;
     } else if (qres == QRESULT_UNIQUE_CONSTRAINT_ERROR) {
         send_error_message(client_socket, 409, "E-Mail already taken.");
-    } else {
+        return;
+    }
+
+    if (SEND_EMAILS) {
         const char *verify_filepath = DOCUMENT_ROOT"/mails/email_verification.html";
         char verification_form[512 + MAX_TOKEN_LENGTH];
         snprintf(verification_form, sizeof(verification_form),
@@ -905,9 +915,9 @@ static void signup_user(HttpRequest *req, Task *context) {
             send_error_message(client_socket, 500, "Couldn't send a verification e-mail.");
             return;
         }
-        const char *location = "Location: /user\r\n";
-        send_headers(client_socket, 201, NULL, location);
     }
+    const char *location = "Location: /user\r\n";
+    send_headers(client_socket, 201, NULL, location);
 }
 
 
@@ -1061,20 +1071,22 @@ void update_user(HttpRequest *req, Task *context) {
             send_error_message(client_socket, 409, "E-Mail already taken.");
             return;
         }
-        const char *verify_filepath = DOCUMENT_ROOT"/mails/email_verification.html";
-        char verification_form[512 + MAX_TOKEN_LENGTH];
-        snprintf(verification_form, sizeof(verification_form),
-                 "<form action=\"%s/user/verify-new\" method=\"POST\" enctype=\"application/x-www-form-urlencoded\">"
-                 "<input type=\"hidden\" name=\"email\" value=\"%s\">"
-                 "<input type=\"hidden\" name=\"vtoken\" value=\"%s\">"
-                 "<button type=\"submit\">Click Here</button>"
-                 "</form>",
-                 SERVER_DOMAIN, email, verification_token);
+        if (SEND_EMAILS) {
+            const char *verify_filepath = DOCUMENT_ROOT"/mails/email_verification.html";
+            char verification_form[512 + MAX_TOKEN_LENGTH];
+            snprintf(verification_form, sizeof(verification_form),
+                     "<form action=\"%s/user/verify-new\" method=\"POST\" enctype=\"application/x-www-form-urlencoded\">"
+                     "<input type=\"hidden\" name=\"email\" value=\"%s\">"
+                     "<input type=\"hidden\" name=\"vtoken\" value=\"%s\">"
+                     "<button type=\"submit\">Click Here</button>"
+                     "</form>",
+                     SERVER_DOMAIN, email, verification_token);
 
-        if (!send_email(email, "Verify Your new To-Do e-mail", verify_filepath, "<!-- VER_FORM -->",
-                        verification_form)) {
-            send_error_message(client_socket, 500, "Couldn't send a verification e-mail.");
-            return;
+            if (!send_email(email, "Verify Your new To-Do e-mail", verify_filepath, "<!-- VER_FORM -->",
+                            verification_form)) {
+                send_error_message(client_socket, 500, "Couldn't send a verification e-mail.");
+                return;
+            }
         }
     } else if (found_keys[1]) {
         extract_url_param(body, "password", password, DB_PASSWORD_LEN);
