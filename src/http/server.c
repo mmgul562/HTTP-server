@@ -187,17 +187,9 @@ static void *worker_thread(void *null) {
 
             RequestParsingStatus status = parse_http_request(request_buffer, &request);
             if (status == REQ_PARSE_SUCCESS) {
-                printf("Received request:\n");
-                printf("Method: %d\n", request.method);
-                printf("Path: %s\n", request.path);
-                printf("Protocol: %s\n", request.protocol);
-                printf("Headers:\n%s\n", request.headers ? request.headers : "");
-                printf("Body: %s\n\n", request.body ? request.body : "");
-
                 handle_http_request(&request, &task);
                 free_http_request(&request);
             } else {
-                printf("Rejected request\n");
                 handle_invalid_http_request(status, client_socket);
             }
         }

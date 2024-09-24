@@ -11,8 +11,8 @@ This project is a To-Do HTTP server implemented in C, containerized with Docker,
 
 1. Clone the repository
 2. Rename `.env.example` file in the project root to `.env` and replace the values
-3. Build and run the docker containers:
-   ```bash
+3. Build and run the Docker containers:
+   ```shell
    docker-compose up --build
    ```
 4. The server should now be running and accessible at `http://localhost:8080`
@@ -64,17 +64,17 @@ This project is a To-Do HTTP server implemented in C, containerized with Docker,
 - `DELETE /todo/<id>` - Delete a specific to-do
 
 ---
-#### Note 1: This project is not a REST API; the routes are designed to be accessed via the app's simple frontend.
-#### Note 2: In `/src/http/routing/handlers.c` value `SEND_EMAILS` is by default set to `false`, which means no emails will be sent. In that case, you'll have to verify your email by manually sending a POST request to `/user/verify` with the email and verification token (accessible in the database) in the request body.
+#### Note 1: This project is not a REST API; the routes are generally designed to be accessed via the app's simple frontend. Using tools like `curl` to manually send requests is only really necessary when you don't want to send actual emails, but want to verify an account.
+#### Note 2: In `/src/http/routing/handlers.c` value `SEND_EMAILS` is by default set to `false`, which means no emails will be sent. If you want to keep it this way, you'll have to verify your email by manually sending a POST request to `/user/verify` with the email and verification token (accessible in the database) in the request body.
 
 ## License Information
 
 This project uses the following third-party libraries:
 
-- [libpq](https://www.postgresql.org/about/licence/): PostgreSQL License (MIT-style)
-- [libargon2](https://github.com/P-H-C/phc-winner-argon2/blob/master/LICENSE): Simplified BSD License
-- [libcurl](https://curl.se/docs/copyright.html): MIT License
-- [OpenSSL](https://www.openssl.org/source/license.html): OpenSSL License and SSLeay License
+- [libpq (PostgreSQL License)](https://www.postgresql.org/about/licence/)
+- [libargon2 (Simplified BSD License)](https://github.com/P-H-C/phc-winner-argon2/blob/master/LICENSE) 
+- [libcurl (MIT License)](https://curl.se/docs/copyright.html) 
+- [OpenSSL (OpenSSL License and SSLeay License)](https://www.openssl.org/source/license.html) 
 
 ### OpenSSL License
 
