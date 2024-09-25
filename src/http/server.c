@@ -15,10 +15,11 @@
 #define INITIAL_RETRY_DELAY_MS 100
 #define MAX_RETRY_DELAY_MS 10000
 #define MAX_QUEUE_SIZE 100
+#define DB_CONN_WAIT_TIMEOUT_MS 10000
 
 
 volatile sig_atomic_t keep_running = 1;
-pthread_t *threads = NULL;
+pthread_t threads[THREAD_POOL_SIZE];
 pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t queue_cond = PTHREAD_COND_INITIALIZER;
 
@@ -82,6 +83,59 @@ static PGconn *connect_to_db() {
 
     fprintf(stderr, "Failed to connect to the database after %d attempts\n", MAX_RETRIES);
     return NULL;
+}
+
+
+bool init_connection_pool(ConnectionPool *pool) {
+    pthread_mutex_init(&pool->mutex, NULL);
+
+    for (int i = 0; i < CONN_POOL_SIZE; ++i) {
+        pool->connections[i].conn = connect_to_db();
+        if (!pool->connections[i].conn) {
+            for (int j = i - 1; j >= 0; --j) {
+                PQfinish(pool->connections[j].conn);
+            }
+            return false;
+        }
+        pool->connections[i].in_use = 0;
+    }
+    return true;
+}
+
+
+PGconn *get_connection(ConnectionPool *pool) {
+    pthread_mutex_lock(&pool->mutex);
+    for (int i = 0; i < CONN_POOL_SIZE; ++i) {
+        if (!pool->connections[i].in_use) {
+            pool->connections[i].in_use = true;
+            pthread_mutex_unlock(&pool->mutex);
+            return pool->connections[i].conn;
+        }
+    }
+    pthread_mutex_unlock(&pool->mutex);
+    return NULL;
+}
+
+
+void release_connection(ConnectionPool *pool, PGconn *conn) {
+    pthread_mutex_lock(&pool->mutex);
+    for (int i = 0; i < CONN_POOL_SIZE; ++i) {
+        if (pool->connections[i].conn == conn) {
+            pool->connections[i].in_use = false;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&pool->mutex);
+}
+
+
+void cleanup_connection_pool(ConnectionPool *pool) {
+    for (int i = 0; i < CONN_POOL_SIZE; ++i) {
+        if (pool->connections[i].conn) {
+            PQfinish(pool->connections[i].conn);
+        }
+    }
+    pthread_mutex_destroy(&pool->mutex);
 }
 
 
@@ -169,7 +223,8 @@ static ssize_t receive_full_request(int client_socket, char **request_buffer, si
 }
 
 
-static void *worker_thread(void *null) {
+static void *worker_thread(void *connections) {
+    ConnectionPool *connection_pool = (ConnectionPool *)connections;
     while (keep_running) {
         Task task = dequeue_task();
         int client_socket = task.client_socket;
@@ -187,6 +242,36 @@ static void *worker_thread(void *null) {
 
             RequestParsingStatus status = parse_http_request(request_buffer, &request);
             if (status == REQ_PARSE_SUCCESS) {
+                if (needs_db_conn(&request)) {
+                    PGconn *task_conn = get_connection(connection_pool);
+
+                    // should only happen when thread pool is bigger than connection pool
+                    if (!task_conn) {
+                        struct timespec start, now;
+                        clock_gettime(CLOCK_MONOTONIC, &start);
+
+                        while (!task_conn && keep_running) {
+                            task_conn = get_connection(connection_pool);
+                            if (!task_conn) {
+                                struct timespec wait_time = {0, 100000000};
+                                nanosleep(&wait_time, NULL);
+
+                                clock_gettime(CLOCK_MONOTONIC, &now);
+                                if ((now.tv_sec - start.tv_sec) * 1000 + (now.tv_nsec - start.tv_nsec) / 1000000 > DB_CONN_WAIT_TIMEOUT_MS) {
+                                    break;
+                                }
+                            }
+                        }
+                        if (!task_conn) {
+                            try_sending_error_file(client_socket, 503);
+                            free_http_request(&request);
+                            free(request_buffer);
+                            close(client_socket);
+                            continue;
+                        }
+                    }
+                    task.db_conn = task_conn;
+                }
                 handle_http_request(&request, &task);
                 free_http_request(&request);
             } else {
@@ -194,24 +279,24 @@ static void *worker_thread(void *null) {
             }
         }
         free(request_buffer);
+        if (task.db_conn) release_connection(connection_pool, task.db_conn);
         close(client_socket);
     }
     return NULL;
 }
 
 
-int server_init(Server *server, int port, int thread_pool_size) {
-    server->db_conn = connect_to_db();
-    if (!server->db_conn) {
-        return -1;
+bool server_init(Server *server, int port) {
+    if (!init_connection_pool(&server->conns)) {
+        return false;
     }
 
-    cleanup_database(server->db_conn);
+    cleanup_database(server->conns.connections[0].conn);
 
     server->server_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (server->server_socket == -1) {
         perror("Socket creation failed");
-        return -1;
+        return false;
     }
 
     server->server_addr.sin_family = AF_INET;
@@ -220,32 +305,29 @@ int server_init(Server *server, int port, int thread_pool_size) {
 
     if (bind(server->server_socket, (struct sockaddr *) &server->server_addr, sizeof(server->server_addr)) < 0) {
         perror("Bind failed");
-        return -1;
+        return false;
     }
     if (listen(server->server_socket, 10) < 0) {
         perror("Listen failed");
-        return -1;
+        return false;
     }
 
     server->port = port;
-    server->thread_pool_size = thread_pool_size;
-    threads = calloc(thread_pool_size, sizeof(pthread_t));
-    if (!threads) {
-        perror("Failed to allocate memory for threads");
-        return -1;
-    }
-    for (int i = 0; i < thread_pool_size; i++) {
-        if (pthread_create(&threads[i], NULL, worker_thread, NULL) != 0) {
+
+    for (int i = 0; i < THREAD_POOL_SIZE; ++i) {
+        if (pthread_create(&threads[i], NULL, worker_thread, &server->conns) != 0) {
             perror("Failed to create worker thread");
-            return -1;
+            return false;
         }
     }
-    return 0;
+    return true;
 }
 
 
 void server_run(Server *server) {
     printf("Server listening on port %d\n", server->port);
+
+    int server_socket = server->server_socket;
 
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
@@ -261,13 +343,13 @@ void server_run(Server *server) {
 
         fd_set read_fds;
         FD_ZERO(&read_fds);
-        FD_SET(server->server_socket, &read_fds);
+        FD_SET(server_socket, &read_fds);
 
         struct timeval timeout;
         timeout.tv_sec = 1;
         timeout.tv_usec = 0;
 
-        int ready = select(server->server_socket + 1, &read_fds, NULL, NULL, &timeout);
+        int ready = select(server_socket + 1, &read_fds, NULL, NULL, &timeout);
 
         if (ready < 0) {
             if (errno == EINTR) {
@@ -279,7 +361,7 @@ void server_run(Server *server) {
             continue;
         }
 
-        int client_socket = accept(server->server_socket, (struct sockaddr *) &client_addr, &client_len);
+        int client_socket = accept(server_socket, (struct sockaddr *) &client_addr, &client_len);
         if (client_socket < 0) {
             if (errno == EINTR) {
                 continue;
@@ -289,19 +371,18 @@ void server_run(Server *server) {
         }
 
         printf("New connection accepted\n");
-        Task new_task = {client_socket, server->db_conn};
+        Task new_task = {client_socket, NULL};
         enqueue_task(new_task);
     }
 
-    for (int i = 0; i < server->thread_pool_size; i++) {
+    for (int i = 0; i < THREAD_POOL_SIZE; ++i) {
         Task exit_task = {-1, NULL};
         enqueue_task(exit_task);
     }
 
-    for (int i = 0; i < server->thread_pool_size; i++) {
+    for (int i = 0; i < THREAD_POOL_SIZE; ++i) {
         pthread_join(threads[i], NULL);
     }
-    free(threads);
 
     printf("Server shutting down...\n");
 }

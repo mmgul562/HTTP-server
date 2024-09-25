@@ -1,6 +1,6 @@
 # To-Do HTTP Server in C
 
-This project is a To-Do HTTP server implemented in C, containerized with Docker, and using PostgreSQL as the database backend. It provides an authentication system and CRUD operations for managing to-do items.
+This project is a multithreaded To-Do HTTP server implemented in C, containerized with Docker, and using PostgreSQL as the database backend. It provides an authentication system and CRUD operations for managing to-do items.
 
 ## Requirements
 
@@ -45,7 +45,8 @@ This project is a To-Do HTTP server implemented in C, containerized with Docker,
 - `GET /about` - About page
 
 ### User Authentication and Management
-- `GET /user` - Get authentication/user management page
+- `GET /user` - Get user management page
+- `GET /user/auth` - Get user authentication page
 - `POST /user/signup` - Register a new user
 - `POST /user/login` - Authenticate a user
 - `POST /user/logout` - Log out a user

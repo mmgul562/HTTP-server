@@ -3,19 +3,18 @@
 #include <unistd.h>
 
 #define PORT 8080
-#define THREAD_POOL_SIZE 10
 
 
 int main() {
     Server server;
-    if (server_init(&server, PORT, THREAD_POOL_SIZE) != 0) {
+    if (!server_init(&server, PORT)) {
         exit(EXIT_FAILURE);
     }
 
     server_run(&server);
 
     close(server.server_socket);
-    PQfinish(server.db_conn);
+    cleanup_connection_pool(&server.conns);
 
     return 0;
 }

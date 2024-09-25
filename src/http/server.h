@@ -4,17 +4,32 @@
 #include <arpa/inet.h>
 #include "util/task.h"
 
+#define CONN_POOL_SIZE 10
+#define THREAD_POOL_SIZE 10
+
+
+typedef struct {
+    PGconn *conn;
+    bool in_use;
+} PooledConnection;
+
+typedef struct {
+    PooledConnection connections[CONN_POOL_SIZE];
+    pthread_mutex_t mutex;
+} ConnectionPool;
+
 typedef struct {
     int server_socket;
     struct sockaddr_in server_addr;
     int port;
-    int thread_pool_size;
-    PGconn *db_conn;
+    ConnectionPool conns;
 } Server;
 
-int server_init(Server *server, int port, int thread_pool_size);
+bool server_init(Server *server, int port);
 
 void server_run(Server *server);
+
+void cleanup_connection_pool(ConnectionPool *pool);
 
 
 #endif

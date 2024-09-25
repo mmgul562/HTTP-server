@@ -6,5 +6,7 @@
 
 void handle_http_request(HttpRequest *req, Task *context);
 
+bool needs_db_conn(HttpRequest *req);
+
 
 #endif

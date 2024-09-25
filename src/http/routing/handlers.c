@@ -29,6 +29,8 @@ static void update_todo(HttpRequest *req, Task *context);
 
 static void delete_todo(HttpRequest *req, Task *context);
 
+static void get_authentication_page(HttpRequest *req, Task *context);
+
 static void get_user_page(HttpRequest *req, Task *context);
 
 static void verify_email(HttpRequest *req, Task *context);
@@ -59,6 +61,7 @@ static const Route ROUTES[] = {
         {"/todo",                 POST,   create_todo},
         {"/todo/",                PATCH,  update_todo},
         {"/todo/",                DELETE, delete_todo},
+        {"/user/auth",            GET,    get_authentication_page},
         {"/user/verify",          POST,   verify_email},
         {"/user/verify",          GET,    get_verification_page},
         {"/user/verify-new",      POST,   verify_new_email},
@@ -110,7 +113,7 @@ static void get_home(HttpRequest *req, Task *context) {
 
     QueryResult qres = check_session(req->headers, context->db_conn, &user_id, csrf_token);
     if (qres == QRESULT_NONE_AFFECTED) {
-        const char *location = "Location: /user\r\n";
+        const char *location = "Location: /user/auth\r\n";
         send_headers(client_socket, 303, NULL, location);
     } else if (qres == QRESULT_INTERNAL_ERROR) {
         try_sending_error_file(client_socket, 500);
@@ -447,7 +450,8 @@ static void get_user_page(HttpRequest *req, Task *context) {
 
     QueryResult qres = check_session(req->headers, context->db_conn, &user_id, csrf_token);
     if (qres == QRESULT_NONE_AFFECTED) {
-        get_authentication_page(req, context);
+        const char *location = "Location: /user/auth\r\n";
+        send_headers(client_socket, 303, NULL, location);
         return;
     } else if (qres == QRESULT_INTERNAL_ERROR) {
         send_error_message(client_socket, 500, "Couldn't retrieve session information.");
@@ -1127,6 +1131,14 @@ void delete_user(HttpRequest *req, Task *context) {
     } else {
         send_headers(client_socket, 204, NULL, NULL);
     }
+}
+
+
+bool needs_db_conn(HttpRequest *req) {
+    if (req->method != GET) return true;
+    if (strcmp(req->path, "/about") == 0) return false;
+    if (strcmp(req->path, "/user/auth") == 0) return false;
+    return true;
 }
 
 
