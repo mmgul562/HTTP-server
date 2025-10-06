@@ -21,7 +21,7 @@ This project is a multithreaded To-Do HTTP server implemented in C, containerize
 
 - User Authentication
   - Authenticate with email and password
-  - Email verification for new accounts
+  - Email verification for new accounts (optional)
 - To-Do Management
   - Create new to-do items
   - Read existing to-do items
@@ -36,7 +36,7 @@ This project is a multithreaded To-Do HTTP server implemented in C, containerize
   - Password reset via email link
 
 ---
-#### Note: For email functionality, the app uses the SMTP server credentials provided in the `.env` file. In production environments, you'd probably want to use a dedicated mail API service.
+#### Note: For emailing functionality, the app uses the SMTP server credentials provided in the `.env` file. In production environments, you'd probably want to use a dedicated mail API service.
 
 ## Available Routes
 
@@ -65,17 +65,23 @@ This project is a multithreaded To-Do HTTP server implemented in C, containerize
 - `DELETE /todo/<id>` - Delete a specific to-do
 
 ---
-#### Note 1: This project is not a REST API; the routes are generally designed to be accessed via the app's simple frontend. Using tools like `curl` to manually send requests is only really necessary when you don't want to send actual emails, but want to verify an account.
-#### Note 2: In `/src/http/routing/handlers.c` value `SEND_EMAILS` is by default set to `false`, which means no emails will be sent. If you want to keep it this way, you'll have to verify your email by manually sending a POST request to `/user/verify` with the email and verification token (accessible in the database) in the request body.
+#### Note: In `/src/http/routing/handlers.c` value `SEND_EMAILS` is by default set to `false`, and value `AUTO_VERIFY` is set to `true`, which means no emails will be sent and all accounts will be verified automatically. You can disable `AUTO_VERIFY` and either:
+1. Keep `SEND_EMAILS` as false - you'll have to verify your email by manually sending a POST request to `/user/verify` with the email and verification token (accessible in the database) in the request body, e.g.:
+```shell
+curl -X POST http://localhost:8080/user/verify \
+     -H "Content-Type: application/x-www-form-urlencoded" \
+     -d "email=user@example.com&vtoken=8c9d83e87e46a19b2fa55e40d8c2c85b"
+```
+2. Or set `SEND_EMAILS` as true - you'll have to verify your email by clicking the link provided in the verification email (surprising, I know)
 
 ## License Information
 
 This project uses the following third-party libraries:
 
 - [libpq (PostgreSQL License)](https://www.postgresql.org/about/licence/)
-- [libargon2 (Simplified BSD License)](https://github.com/P-H-C/phc-winner-argon2/blob/master/LICENSE) 
-- [libcurl (MIT License)](https://curl.se/docs/copyright.html) 
-- [OpenSSL (OpenSSL License and SSLeay License)](https://www.openssl.org/source/license.html) 
+- [libargon2 (Simplified BSD License)](https://github.com/P-H-C/phc-winner-argon2/blob/master/LICENSE)
+- [libcurl (MIT License)](https://curl.se/docs/copyright.html)
+- [OpenSSL (OpenSSL License and SSLeay License)](https://www.openssl.org/source/license.html)
 
 ### OpenSSL License
 

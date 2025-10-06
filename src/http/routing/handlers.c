@@ -11,6 +11,7 @@
 #include <arpa/inet.h>
 
 #define SEND_EMAILS false
+#define AUTO_VERIFY true
 #define SERVER_DOMAIN "http://localhost:8080"
 #define PAGE_SIZE 8
 #define MAX_TODOS_HTML_SIZE 20240
@@ -83,14 +84,14 @@ static const Route *check_route(const char *url, Method method) {
     if (method == DELETE || method == PATCH) {
         const char *route_url;
         for (int i = 0; i < ROUTES_COUNT; ++i) {
-            route_url = ROUTES[i].url;
+            route_url = ROUTES[i].path;
             if (strncmp(url, route_url, strlen(route_url)) == 0 && method == ROUTES[i].method) {
                 return &ROUTES[i];
             }
         }
     } else {
         for (int i = 0; i < ROUTES_COUNT; ++i) {
-            if (strcmp(url, ROUTES[i].url) == 0 && method == ROUTES[i].method) {
+            if (strcmp(url, ROUTES[i].path) == 0 && method == ROUTES[i].method) {
                 return &ROUTES[i];
             }
         }
@@ -895,7 +896,7 @@ static void signup_user(HttpRequest *req, Task *context) {
     User user = {.email = email, .password = password};
     char verification_token[MAX_TOKEN_LENGTH + 1];
 
-    QueryResult qres = db_signup_user(context->db_conn, &user, verification_token);
+    QueryResult qres = db_signup_user(context->db_conn, &user, verification_token, AUTO_VERIFY);
     if (qres == QRESULT_INTERNAL_ERROR) {
         send_error_message(client_socket, 500, "Couldn't sign up the user.");
         return;
@@ -904,7 +905,7 @@ static void signup_user(HttpRequest *req, Task *context) {
         return;
     }
 
-    if (SEND_EMAILS) {
+    if (SEND_EMAILS && !AUTO_VERIFY) {
         const char *verify_filepath = DOCUMENT_ROOT"/mails/email_verification.html";
         char verification_form[512 + MAX_TOKEN_LENGTH];
         snprintf(verification_form, sizeof(verification_form),

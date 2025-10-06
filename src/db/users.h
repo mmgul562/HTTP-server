@@ -26,7 +26,7 @@ bool db_verify_email(PGconn *conn, const char *email);
 
 bool db_get_user_email(PGconn *conn, int id, char *email);
 
-QueryResult db_signup_user(PGconn *conn, User *user, char *token);
+QueryResult db_signup_user(PGconn *conn, User *user, char *token, bool auto_verify);
 
 QueryResult db_login_user(PGconn *conn, User *user, char *session_token);
 

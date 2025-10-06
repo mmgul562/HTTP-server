@@ -6,7 +6,7 @@
 
 
 typedef struct {
-    const char *url;
+    const char *path;
     Method method;
     void (*handler)(HttpRequest *, Task *);
 } Route;

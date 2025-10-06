@@ -186,7 +186,7 @@ static bool update_unverified_user(PGconn *conn, const char *email, const char *
 }
 
 
-QueryResult db_signup_user(PGconn *conn, User *user, char *token) {
+QueryResult db_signup_user(PGconn *conn, User *user, char *token, bool auto_verify) {
     uint8_t salt[SALT_LEN];
     char encoded[ENCODED_LEN];
 
@@ -194,14 +194,17 @@ QueryResult db_signup_user(PGconn *conn, User *user, char *token) {
         fprintf(stderr, "Error generating random salt\n");
         return QRESULT_INTERNAL_ERROR;
     }
+
     uint32_t t_cost = 2;
     uint32_t m_cost = (1 << 16);
     uint32_t parallelism = 1;
 
-    int result = argon2id_hash_encoded(t_cost, m_cost, parallelism,
-                                       user->password, strlen(user->password),
-                                       salt, SALT_LEN,
-                                       HASH_LEN, encoded, ENCODED_LEN);
+    int result = argon2id_hash_encoded(
+        t_cost, m_cost, parallelism,
+        user->password, strlen(user->password),
+        salt, SALT_LEN,
+        HASH_LEN, encoded, ENCODED_LEN
+    );
 
     if (result != ARGON2_OK) {
         fprintf(stderr, "Error hashing password: %s\n", argon2_error_message(result));
@@ -209,20 +212,38 @@ QueryResult db_signup_user(PGconn *conn, User *user, char *token) {
     }
 
     char verification_token[SESSION_TOKEN_LENGTH * 2 + 1];
-    if (!generate_token(verification_token)) {
-        fprintf(stderr, "Error generating verification token\n");
-        return QRESULT_INTERNAL_ERROR;
-    }
     time_t expiry_time = time(NULL) + (VERIFICATION_EXPIRY_HRS * 3600);
     char expiry_str[21];
     snprintf(expiry_str, sizeof(expiry_str), "%ld", expiry_time);
 
-    const char *query = "INSERT INTO users (email, password, verification_token, token_expires_at) VALUES ($1, $2, $3, to_timestamp($4))";
-    const char *params[4] = {user->email, encoded, verification_token, expiry_str};
-    int param_lengths[4] = {strlen(user->email), strlen(encoded), strlen(verification_token), strlen(expiry_str)};
-    int param_formats[4] = {0, 0, 0, 0};
+    PGresult *res = NULL;
 
-    PGresult *res = PQexecParams(conn, query, 4, NULL, params, param_lengths, param_formats, 0);
+    if (auto_verify) {
+        const char *query =
+            "INSERT INTO users (email, password, is_verified) VALUES ($1, $2, TRUE)";
+        const char *params[2] = {user->email, encoded};
+        int param_lengths[2] = {strlen(user->email), strlen(encoded)};
+        int param_formats[2] = {0, 0};
+
+        res = PQexecParams(conn, query, 2, NULL, params, param_lengths, param_formats, 0);
+    } else {
+        if (!generate_token(verification_token)) {
+            fprintf(stderr, "Error generating verification token\n");
+            return QRESULT_INTERNAL_ERROR;
+        }
+
+        const char *query =
+            "INSERT INTO users (email, password, verification_token, token_expires_at) "
+            "VALUES ($1, $2, $3, to_timestamp($4))";
+        const char *params[4] = {user->email, encoded, verification_token, expiry_str};
+        int param_lengths[4] = {
+            strlen(user->email), strlen(encoded),
+            strlen(verification_token), strlen(expiry_str)
+        };
+        int param_formats[4] = {0, 0, 0, 0};
+
+        res = PQexecParams(conn, query, 4, NULL, params, param_lengths, param_formats, 0);
+    }
 
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
         if (strcmp(PQresultErrorField(res, PG_DIAG_SQLSTATE), "23505") == 0) {
@@ -237,7 +258,10 @@ QueryResult db_signup_user(PGconn *conn, User *user, char *token) {
                 if (!update_unverified_user(conn, user->email, encoded, verification_token, expiry_str)) {
                     return QRESULT_INTERNAL_ERROR;
                 }
-                strcpy(token, verification_token);
+                if (!auto_verify)
+                    strcpy(token, verification_token);
+                else
+                    token[0] = '\0';
                 return QRESULT_OK;
             }
         }
@@ -245,11 +269,15 @@ QueryResult db_signup_user(PGconn *conn, User *user, char *token) {
         PQclear(res);
         return QRESULT_INTERNAL_ERROR;
     }
-    strcpy(token, verification_token);
+
+    if (!auto_verify)
+        strcpy(token, verification_token);
+    else
+        token[0] = '\0';
+
     PQclear(res);
     return QRESULT_OK;
 }
-
 
 // for cleaning up old sessions
 static bool delete_user_sessions(PGconn *conn, int user_id) {
